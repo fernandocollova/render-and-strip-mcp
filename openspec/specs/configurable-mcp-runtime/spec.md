@@ -30,7 +30,7 @@ The repository SHALL provide Docker Compose configuration for a pinned tested re
 - **THEN** Playwright MCP, llama.cpp, and the deterministic HTTP test site expose endpoints usable by the application and each MCP client session receives an isolated browser context
 
 #### Scenario: Integration configuration accesses the HTTP fixture
-- **WHEN** the Compose integration smoke test invokes the application against the deterministic HTTP test site
+- **WHEN** the Compose integration test invokes the application against the deterministic HTTP test site
 - **THEN** its test configuration explicitly enables plain HTTP without changing the default runtime setting
 
 #### Scenario: Default model image is built

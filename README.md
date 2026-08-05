@@ -75,11 +75,11 @@ it.
 
 Building the llama.cpp service downloads the default 398 MB Qwen2.5-0.5B-Instruct Q4_K_M GGUF
 model. The Dockerfile verifies its SHA-256 before embedding it in the image. The default is small
-enough for local CPU smoke testing, though a larger tool-capable model is often better for real
+enough for local CPU testing, though a larger tool-capable model is often better for real
 browser tasks.
 
 ```bash
-docker compose up -d
+docker compose up -d --wait
 uv run render-and-strip-mcp examples/compose.toml
 ```
 
@@ -97,15 +97,21 @@ docker compose build llama-cpp
 `http://localhost:8081/`. Do not use that setting for ordinary deployments. External Playwright
 MCP deployments are responsible for the required isolated, non-shared browser-context flags.
 
-After the Compose services are ready, run the browser and fixture smoke test:
+After the Compose services are ready, run the browser and fixture integration suite:
 
 ```bash
-RUN_COMPOSE_SMOKE=1 uv run pytest tests/integration
+uv run pytest tests/integration --run-compose-integration --no-cov
 ```
 
-It uses the explicit plain-HTTP integration configuration and navigates the isolated Playwright
-session to `http://test-site:8081/`. A complete `render_and_strip_page` smoke call additionally
-requires a reliably tool-capable GGUF model, which is not part of the deterministic test suite.
+The focused command disables coverage because the 80% gate applies to the full suite. Endpoint
+options default to Compose service DNS names and can be overridden with `--compose-app-endpoint`,
+`--compose-fixture-url`, `--compose-model-api-base`, and `--compose-playwright-endpoint`.
+
+It uses the explicit plain-HTTP integration configuration, validates the official Playwright MCP
+wire contract and rendered-document cleanup against `http://test-site:8081/`, checks the actual
+model and application transports, and avoids nondeterministic local-model tool calls. A complete
+`render_and_strip_page` end-to-end call additionally requires a reliably tool-capable GGUF model,
+which is not part of the deterministic test suite.
 
 ### Dev container
 
@@ -119,17 +125,19 @@ virtual environment when switching if necessary.
 
 ## Verification
 
-Run the deterministic unit suite and formatting checks:
+Run the deterministic suite, which emits terminal and XML coverage reports and enforces 80% branch
+coverage, plus formatting checks:
 
 ```bash
 uv run ruff check .
 uv run ruff format --check .
-uv run pytest tests/unit
+uv run pytest
 ```
 
-The local Compose stack validates transport and browser compatibility. A live browser-agent smoke
-test additionally requires the configured llama.cpp GGUF model to reliably emit the required
-streamed tool-call protocol, so it is documented rather than run in the unit suite.
+The local Compose stack validates transport and browser compatibility. A live browser-agent
+end-to-end integration test additionally requires the configured llama.cpp GGUF model to reliably
+emit the required streamed tool-call protocol, so it is documented rather than run in the unit
+suite.
 
 ## Tested compatibility pins
 
