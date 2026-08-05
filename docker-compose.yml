@@ -53,6 +53,7 @@ services:
       uv run render-and-strip-mcp examples/devcontainer.toml
     volumes:
       - .:/workspace
+      - home-data:/home/devcontainer
     depends_on:
       - playwright-mcp
       - llama-cpp
@@ -69,3 +70,6 @@ services:
       timeout: 2s
       retries: 20
       start_period: 30s
+
+volumes:
+  home-data:
