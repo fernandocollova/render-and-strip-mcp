@@ -16,7 +16,6 @@ from .browser_tabs import current_tab_index, list_browser_tabs, select_original_
 from .config import Settings
 from .errors import BrowserAgentError, ExecutionLimitError
 from .html_cleaner import clean_rendered_html
-from .invocation_gate import InvocationGate
 from .mcp_results import extract_json_string_result, extract_text_result
 from .playwright_tools import PlaywrightSession, open_playwright_session
 from .reasoning_progress import ReasoningProgressReporter
@@ -32,11 +31,9 @@ class BrowserAgent:
     def __init__(
         self,
         settings: Settings,
-        invocation_gate: InvocationGate,
         reasoning_progress: ReasoningProgressReporter | None = None,
     ):
         self._settings = settings
-        self._invocation_gate = invocation_gate
         self._reasoning_progress = reasoning_progress
 
     async def run(self, url: str, task: str) -> str:
@@ -44,7 +41,6 @@ class BrowserAgent:
 
         session: PlaywrightSession | None = None
         session_manager = None
-        gate_manager = None
         primary_error: BaseException | None = None
         final_url = ""
         try:
@@ -53,8 +49,6 @@ class BrowserAgent:
                     if not task.strip():
                         raise BrowserAgentError("The browser task must not be empty.")
                     UrlPolicy(url, self._settings.agent.allow_plain_http).validate_initial_url()
-                    gate_manager = self._invocation_gate.acquire()
-                    await gate_manager.__aenter__()
                     session_manager = open_playwright_session(
                         str(self._settings.playwright_mcp.endpoint)
                     )
@@ -91,8 +85,6 @@ class BrowserAgent:
                     logger.warning("Playwright browser cleanup failed: %s", cleanup_error)
             if session_manager is not None:
                 await session_manager.__aexit__(None, None, None)
-            if gate_manager is not None:
-                await gate_manager.__aexit__(None, None, None)
         return final_url
 
     async def _run_session(self, session: PlaywrightSession, url: str, task: str) -> str:

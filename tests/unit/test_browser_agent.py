@@ -1,4 +1,4 @@
-"""Tests for browser-session policy, cleanup, and concurrency behavior."""
+"""Tests for browser-session policy and cleanup behavior."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ import render_and_strip_mcp.browser_agent as browser_agent_module
 from render_and_strip_mcp.agent_context import BrowserActionResult
 from render_and_strip_mcp.config import Settings
 from render_and_strip_mcp.errors import BrowserAgentError
-from render_and_strip_mcp.invocation_gate import InvocationGate
 from render_and_strip_mcp.playwright_tools import PlaywrightSession, ToolCatalog
 
 
@@ -112,9 +111,7 @@ def test_agent_restores_original_tab_and_ignores_popup(monkeypatch: pytest.Monke
     monkeypatch.setattr(browser_agent_module, "run_agent_loop", fake_run_loop)
 
     final_url = asyncio.run(
-        browser_agent_module.BrowserAgent(settings(), InvocationGate(0)).run(
-            "https://example.test/", "click"
-        )
+        browser_agent_module.BrowserAgent(settings()).run("https://example.test/", "click")
     )
 
     assert "<body>Done</body>" in final_url
@@ -135,9 +132,7 @@ def test_agent_rejects_invalid_input_before_opening_session(
 
     with pytest.raises(BrowserAgentError, match="Plain HTTP"):
         asyncio.run(
-            browser_agent_module.BrowserAgent(settings(), InvocationGate(0)).run(
-                "http://example.test/", "task"
-            )
+            browser_agent_module.BrowserAgent(settings()).run("http://example.test/", "task")
         )
 
 
@@ -158,9 +153,7 @@ def test_agent_rejects_cross_origin_action_and_still_cleans_up(
 
     with pytest.raises(BrowserAgentError, match="left the initial document origin"):
         asyncio.run(
-            browser_agent_module.BrowserAgent(settings(), InvocationGate(0)).run(
-                "https://example.test/", "click"
-            )
+            browser_agent_module.BrowserAgent(settings()).run("https://example.test/", "click")
         )
 
     assert client.calls[-1] == ("browser_close", {})
@@ -182,9 +175,7 @@ def test_cleanup_preserves_primary_failure(
 
     with pytest.raises(BrowserAgentError, match="primary failure"):
         asyncio.run(
-            browser_agent_module.BrowserAgent(settings(), InvocationGate(0)).run(
-                "https://example.test/", "task"
-            )
+            browser_agent_module.BrowserAgent(settings()).run("https://example.test/", "task")
         )
 
     assert "cleanup failed" in caplog.text

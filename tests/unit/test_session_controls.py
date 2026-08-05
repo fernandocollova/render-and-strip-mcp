@@ -1,4 +1,4 @@
-"""Tests for dependency translation, cancellation cleanup, and concurrency gates."""
+"""Tests for dependency translation and cancellation cleanup."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ from openai import APIConnectionError
 import render_and_strip_mcp.browser_agent as browser_agent_module
 from render_and_strip_mcp.agent_context import BrowserActionResult
 from render_and_strip_mcp.errors import BrowserAgentError
-from render_and_strip_mcp.invocation_gate import InvocationGate
 
 from .test_browser_agent import FakeBrowserClient, install_fake_session, settings
 
@@ -52,9 +51,7 @@ def test_dependency_errors_are_translated_and_cleaned_up(
 
     with pytest.raises(BrowserAgentError, match=expected_message):
         asyncio.run(
-            browser_agent_module.BrowserAgent(settings(), InvocationGate(0)).run(
-                "https://example.test/", "task"
-            )
+            browser_agent_module.BrowserAgent(settings()).run("https://example.test/", "task")
         )
 
     assert client.calls[-1] == ("browser_close", {})
@@ -77,9 +74,7 @@ def test_cancellation_shields_browser_cleanup(monkeypatch: pytest.MonkeyPatch) -
 
     async def exercise() -> None:
         invocation = asyncio.create_task(
-            browser_agent_module.BrowserAgent(settings(), InvocationGate(0)).run(
-                "https://example.test/", "task"
-            )
+            browser_agent_module.BrowserAgent(settings()).run("https://example.test/", "task")
         )
         await entered_agent_loop.wait()
         invocation.cancel()
@@ -89,34 +84,3 @@ def test_cancellation_shields_browser_cleanup(monkeypatch: pytest.MonkeyPatch) -
     asyncio.run(exercise())
 
     assert [tool_name for tool_name, _ in client.calls].count("browser_close") == 1
-
-
-def test_positive_concurrency_gate_waits_without_timing_assertions() -> None:
-    """A second positive-limit acquisition cannot enter until the first releases its slot."""
-
-    gate = InvocationGate(1)
-
-    async def exercise() -> None:
-        first_entered = asyncio.Event()
-        allow_first_to_finish = asyncio.Event()
-        second_entered = asyncio.Event()
-
-        async def first_invocation() -> None:
-            async with gate.acquire():
-                first_entered.set()
-                await allow_first_to_finish.wait()
-
-        async def second_invocation() -> None:
-            async with gate.acquire():
-                second_entered.set()
-
-        first_task = asyncio.create_task(first_invocation())
-        await first_entered.wait()
-        second_task = asyncio.create_task(second_invocation())
-        await asyncio.sleep(0)
-        assert second_entered.is_set() is False
-        allow_first_to_finish.set()
-        await asyncio.gather(first_task, second_task)
-        assert second_entered.is_set() is True
-
-    asyncio.run(exercise())

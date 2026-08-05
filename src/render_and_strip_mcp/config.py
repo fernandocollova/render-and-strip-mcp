@@ -48,7 +48,6 @@ class AgentSettings(StrictSettingsModel):
     """Browser-agent request policy and execution bounds."""
 
     allow_plain_http: bool = False
-    max_concurrent_invocations: NonNegativeInteger = 0
     max_model_turns: PositiveInteger = 12
     max_browser_actions: PositiveInteger = 30
     total_timeout_seconds: PositiveSeconds = 600

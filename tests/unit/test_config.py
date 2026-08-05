@@ -45,7 +45,6 @@ def test_settings_apply_documented_defaults() -> None:
     assert settings.server.port == 8000
     assert settings.llm.max_output_tokens == 1024
     assert settings.agent.allow_plain_http is False
-    assert settings.agent.max_concurrent_invocations == 0
     assert settings.agent.cleanup_timeout_seconds == 10
     assert settings.output.max_html_bytes == 0
     assert settings.progress.reasoning_progress_max_items == 0
@@ -95,13 +94,11 @@ def test_environment_populates_missing_configuration_file(
     monkeypatch.setenv("RENDER_AND_STRIP_MCP_LLM__API_BASE", "https://model.example/v1")
     monkeypatch.setenv("RENDER_AND_STRIP_MCP_LLM__API_KEY", "environment-key")
     monkeypatch.setenv("RENDER_AND_STRIP_MCP_AGENT__ALLOW_PLAIN_HTTP", "true")
-    monkeypatch.setenv("RENDER_AND_STRIP_MCP_AGENT__MAX_CONCURRENT_INVOCATIONS", "3")
 
     settings = load_settings(tmp_path / "missing.toml")
 
     assert settings.llm.model == "environment-model"
     assert settings.agent.allow_plain_http is True
-    assert settings.agent.max_concurrent_invocations == 3
 
 
 def test_toml_values_take_precedence_over_environment(
@@ -149,18 +146,33 @@ api_key = "key"
         load_settings(configuration_path)
 
 
-def test_request_policy_can_be_configured() -> None:
-    """The plain-HTTP and application concurrency policies are validated settings."""
+def test_plain_http_permission_can_be_configured() -> None:
+    """Plain-HTTP permission is a validated request-policy setting."""
 
     settings = Settings.model_validate(
-        valid_configuration()
-        | {"agent": {"allow_plain_http": True, "max_concurrent_invocations": 2}}
+        valid_configuration() | {"agent": {"allow_plain_http": True}}
     )
 
     assert settings.agent.allow_plain_http is True
-    assert settings.agent.max_concurrent_invocations == 2
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="max_concurrent_invocations"):
         Settings.model_validate(
-            valid_configuration() | {"agent": {"max_concurrent_invocations": -1}}
+            valid_configuration() | {"agent": {"max_concurrent_invocations": 1}}
         )
+
+
+def test_retired_concurrency_environment_setting_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Nested environment variables cannot restore the retired concurrency setting."""
+
+    monkeypatch.setenv(
+        "RENDER_AND_STRIP_MCP_PLAYWRIGHT_MCP__ENDPOINT", "https://browser.example/mcp"
+    )
+    monkeypatch.setenv("RENDER_AND_STRIP_MCP_LLM__MODEL", "environment-model")
+    monkeypatch.setenv("RENDER_AND_STRIP_MCP_LLM__API_BASE", "https://model.example/v1")
+    monkeypatch.setenv("RENDER_AND_STRIP_MCP_LLM__API_KEY", "environment-key")
+    monkeypatch.setenv("RENDER_AND_STRIP_MCP_AGENT__MAX_CONCURRENT_INVOCATIONS", "1")
+
+    with pytest.raises(ValidationError, match="max_concurrent_invocations"):
+        load_settings(tmp_path / "missing.toml")
