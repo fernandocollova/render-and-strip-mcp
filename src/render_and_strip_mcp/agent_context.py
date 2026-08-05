@@ -11,7 +11,11 @@ from typing import Any, Literal
 logger = logging.getLogger(__name__)
 
 SYSTEM_MESSAGE = (
-    "You are a browser agent. Complete the caller's task using the supplied Playwright tools.\n"
+    "You are a browser agent. The service has already loaded the caller's requested initial "
+    "page and will extract clean HTML after you finish. If the caller only asks to clean the "
+    "current page, reply exactly TASK_COMPLETE without a tool call. Do not call browser tools "
+    "or functions for that task. Otherwise, use the supplied Playwright tools only when "
+    "necessary to complete the caller's task.\n"
     "Use one tool call at a time. Work only with the current top-level page and finish by "
     "responding without a tool call when the task is complete. Do not ask the caller for "
     "clarification."

@@ -70,10 +70,7 @@ def test_compose_mcp_cleans_fixture_end_to_end(
                 "render_and_strip_page",
                 {
                     "url": compose_fixture_url,
-                    "task": (
-                        "Clean the current page. The page is already loaded, so do not call "
-                        "browser tools or functions. Reply TASK_COMPLETE when the task is complete."
-                    ),
+                    "task": "Clean the current page.",
                 },
             )
         return extract_text_result(result)

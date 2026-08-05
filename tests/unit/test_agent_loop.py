@@ -102,6 +102,21 @@ def test_context_uses_exactly_one_system_and_one_user_message() -> None:
     assert messages[1]["role"] == "user"
 
 
+def test_model_context_internalizes_loaded_page_cleaning_guidance() -> None:
+    """Internal system guidance, not caller text, controls current-page cleaning behavior."""
+
+    task = "Clean the current page."
+    messages = build_model_messages(task, [], "https://example.test/", "observation")
+
+    assert "service has already loaded the caller's requested initial page" in (
+        messages[0]["content"]
+    )
+    assert "Do not call browser tools or functions" in messages[0]["content"]
+    assert "reply exactly TASK_COMPLETE without a tool call" in messages[0]["content"]
+    assert "only when necessary to complete the caller's task" in messages[0]["content"]
+    assert f"Task:\n{task}" in messages[1]["content"]
+
+
 def test_model_turn_and_browser_action_limits_are_enforced(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
