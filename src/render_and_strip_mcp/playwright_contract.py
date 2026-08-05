@@ -11,6 +11,7 @@ OFFICIAL_PLAYWRIGHT_MCP_IMAGE = (
 REQUIRED_CAPABILITIES = {
     "browser_navigate": "url",
     "browser_tabs": "action",
+    "browser_snapshot": None,
     "browser_evaluate": "function",
     "browser_close": None,
 }
@@ -28,6 +29,16 @@ OFFICIAL_REQUIRED_TOOL_SCHEMAS = {
             "url": {"type": "string"},
         },
         "required": ["action"],
+    },
+    "browser_snapshot": {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string"},
+            "depth": {"type": "number"},
+            "boxes": {"type": "boolean"},
+            "filename": {"type": "string"},
+        },
+        "required": [],
     },
     "browser_evaluate": {
         "type": "object",

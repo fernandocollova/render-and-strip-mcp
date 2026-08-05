@@ -13,7 +13,7 @@ Clock = Callable[[], float]
 
 
 class ReasoningProgressReporter:
-    """Apply invocation-wide item limits and interval coalescing to reasoning deltas."""
+    """Apply invocation-wide limits and coalescing to reasoning and operational items."""
 
     def __init__(
         self,
@@ -35,12 +35,12 @@ class ReasoningProgressReporter:
 
     @property
     def accepted_item_count(self) -> int:
-        """Return the invocation-wide count of accepted non-empty reasoning deltas."""
+        """Return the invocation-wide count of accepted reasoning and status items."""
 
         return self._accepted_item_count
 
     async def accept(self, reasoning_fragment: str) -> None:
-        """Accept one normalized fragment and emit or coalesce it under configured policy."""
+        """Accept one reasoning fragment or status item under the shared configured policy."""
 
         normalized_fragment = reasoning_fragment.strip()
         if not normalized_fragment:
@@ -58,6 +58,11 @@ class ReasoningProgressReporter:
             or current_time - self._last_delivery_time >= self._minimum_interval_seconds
         ):
             await self.flush()
+
+    async def accept_operational_status(self, status: str) -> None:
+        """Submit a clearly labelled orchestration milestone to the shared progress stream."""
+
+        await self.accept(f"[status] {status}")
 
     async def flush(self) -> None:
         """Immediately send any buffered reasoning text without changing the item count."""

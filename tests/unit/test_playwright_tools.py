@@ -9,12 +9,17 @@ import pytest
 from mcp.types import Tool
 
 import render_and_strip_mcp.playwright_tools as playwright_tools
-from render_and_strip_mcp.errors import BrowserCompatibilityError, ToolSchemaError
+from render_and_strip_mcp.errors import (
+    BrowserCompatibilityError,
+    StageToolCollisionError,
+    ToolSchemaError,
+)
 from render_and_strip_mcp.playwright_contract import (
     OFFICIAL_PLAYWRIGHT_MCP_HTTP_PATH,
     OFFICIAL_PLAYWRIGHT_MCP_VERSION,
     OFFICIAL_REQUIRED_TOOL_SCHEMAS,
 )
+from render_and_strip_mcp.stage_models import ACCESS_COMPLETION_TOOL
 
 
 def official_tools() -> list[Tool]:
@@ -85,6 +90,16 @@ def test_pinned_official_contract_records_endpoint_and_required_schemas() -> Non
             },
             "required": ["action"],
         },
+        "browser_snapshot": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string"},
+                "depth": {"type": "number"},
+                "boxes": {"type": "boolean"},
+                "filename": {"type": "string"},
+            },
+            "required": [],
+        },
         "browser_evaluate": {
             "type": "object",
             "properties": {
@@ -114,6 +129,31 @@ def test_catalog_excludes_reserved_and_unsafe_tools() -> None:
         "browser_evaluate",
         "browser_navigate",
     ]
+
+
+def test_catalog_adds_local_completion_tool_without_exposing_or_rerouting_remote_tools() -> None:
+    """Completion reports are handled locally while eligible browser tools remain remote."""
+
+    catalog = playwright_tools.build_tool_catalog(official_tools()).with_completion_tool(
+        ACCESS_COMPLETION_TOOL
+    )
+
+    assert catalog.completion_tool == ACCESS_COMPLETION_TOOL
+    assert catalog.remote_name_by_model_name["browser_click"] == "browser_click"
+    assert [tool["function"]["name"] for tool in catalog.openai_tools][-1] == "complete_access"
+
+
+def test_catalog_rejects_local_completion_name_collision() -> None:
+    """An official remote tool must not shadow the stage-local completion route."""
+
+    tools = [
+        *official_tools(),
+        Tool(name="complete_access", description="Conflicting tool", inputSchema=object_schema()),
+    ]
+    catalog = playwright_tools.build_tool_catalog(tools)
+
+    with pytest.raises(StageToolCollisionError, match="conflicts"):
+        catalog.with_completion_tool(ACCESS_COMPLETION_TOOL)
 
 
 def test_catalog_rejects_invalid_openai_tool_name() -> None:

@@ -11,10 +11,11 @@ from typing import Any
 from fastmcp import Client
 from mcp.types import Tool
 
-from .errors import BrowserCompatibilityError, ToolSchemaError
+from .errors import BrowserCompatibilityError, StageToolCollisionError, ToolSchemaError
 from .playwright_contract import OFFICIAL_REQUIRED_TOOL_SCHEMAS
+from .stage_models import CompletionTool
 
-RESERVED_TOOL_NAMES = frozenset({"browser_tabs", "browser_close"})
+RESERVED_TOOL_NAMES = frozenset({"browser_tabs", "browser_snapshot", "browser_close"})
 EXCLUDED_TOOL_NAMES = frozenset(
     {"browser_run_code_unsafe", "browser_file_upload", "browser_drop", "browser_install"}
 )
@@ -43,6 +44,21 @@ class ToolCatalog:
 
     openai_tools: list[dict[str, object]]
     remote_name_by_model_name: dict[str, str]
+    completion_tool: CompletionTool | None = None
+
+    def with_completion_tool(self, completion_tool: CompletionTool) -> ToolCatalog:
+        """Add one locally routed stage-completion schema to this request's catalog."""
+
+        if completion_tool.name in self.remote_name_by_model_name:
+            raise StageToolCollisionError(
+                f"Local completion tool {completion_tool.name!r} conflicts with a remote "
+                "Playwright tool."
+            )
+        return ToolCatalog(
+            openai_tools=[*self.openai_tools, completion_tool.openai_schema],
+            remote_name_by_model_name=self.remote_name_by_model_name,
+            completion_tool=completion_tool,
+        )
 
 
 @dataclass(frozen=True)

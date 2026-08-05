@@ -11,7 +11,7 @@ from fastmcp.exceptions import ToolError
 from openai import APIConnectionError
 
 import render_and_strip_mcp.browser_agent as browser_agent_module
-from render_and_strip_mcp.agent_context import BrowserActionResult
+from render_and_strip_mcp.agent_loop import StageRunResult
 from render_and_strip_mcp.errors import BrowserAgentError
 
 from .test_browser_agent import FakeBrowserClient, install_fake_session, settings
@@ -41,13 +41,13 @@ def test_dependency_errors_are_translated_and_cleaned_up(
 ) -> None:
     """Only documented provider and remote dependency errors receive outward translation."""
 
-    client = FakeBrowserClient(["https://example.test/start"])
+    client = FakeBrowserClient(["https://example.test/start"] * 2)
     install_fake_session(monkeypatch, client)
 
-    async def fail_run_loop(*arguments: object) -> BrowserActionResult:
+    async def fail_stage(*arguments: object, **keyword_arguments: object) -> StageRunResult:
         raise dependency_error
 
-    monkeypatch.setattr(browser_agent_module, "run_agent_loop", fail_run_loop)
+    monkeypatch.setattr(browser_agent_module, "run_stage", fail_stage)
 
     with pytest.raises(BrowserAgentError, match=expected_message):
         asyncio.run(
@@ -60,23 +60,23 @@ def test_dependency_errors_are_translated_and_cleaned_up(
 def test_cancellation_shields_browser_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
     """Cancellation still invokes browser_close exactly once before propagating."""
 
-    client = FakeBrowserClient(["https://example.test/start"])
+    client = FakeBrowserClient(["https://example.test/start"] * 2)
     install_fake_session(monkeypatch, client)
-    entered_agent_loop = asyncio.Event()
-    unblock_agent_loop = asyncio.Event()
+    entered_stage = asyncio.Event()
+    unblock_stage = asyncio.Event()
 
-    async def blocked_run_loop(*arguments: object) -> BrowserActionResult:
-        entered_agent_loop.set()
-        await unblock_agent_loop.wait()
-        raise AssertionError("The agent loop should have been cancelled.")
+    async def blocked_stage(*arguments: object, **keyword_arguments: object) -> StageRunResult:
+        entered_stage.set()
+        await unblock_stage.wait()
+        raise AssertionError("The stage should have been cancelled.")
 
-    monkeypatch.setattr(browser_agent_module, "run_agent_loop", blocked_run_loop)
+    monkeypatch.setattr(browser_agent_module, "run_stage", blocked_stage)
 
     async def exercise() -> None:
         invocation = asyncio.create_task(
             browser_agent_module.BrowserAgent(settings()).run("https://example.test/", "task")
         )
-        await entered_agent_loop.wait()
+        await entered_stage.wait()
         invocation.cancel()
         with pytest.raises(asyncio.CancelledError):
             await invocation

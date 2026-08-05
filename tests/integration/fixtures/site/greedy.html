@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Greedy retained-document fixture</title>
+  </head>
+  <body>
+    <main>
+      <h1>Greedy retained-document fixture</h1>
+      <p>Initially visible retained content.</p>
+      <button id="load-more" type="button">Load more retained content</button>
+      <section id="retained-content"></section>
+      <details>
+        <summary>Retained disclosure</summary>
+        <p>Expanded retained detail.</p>
+      </details>
+    </main>
+    <script>
+      document.querySelector("#load-more").addEventListener("click", () => {
+        const item = document.createElement("p");
+        item.textContent = "Lazy retained item.";
+        document.querySelector("#retained-content").append(item);
+        document.querySelector("#load-more").disabled = true;
+      });
+    </script>
+  </body>
+</html>

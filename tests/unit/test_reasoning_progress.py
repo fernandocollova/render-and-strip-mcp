@@ -62,6 +62,49 @@ def test_reasoning_limit_applies_across_turns() -> None:
     assert notifications == [(1, 2, "first turn"), (2, 2, "second turn")]
 
 
+def test_operational_status_and_reasoning_share_one_ordered_item_limit() -> None:
+    """Milestones consume the same invocation-wide budget in their actual acceptance order."""
+
+    notifications: list[tuple[float, float | None, str | None]] = []
+
+    async def deliver(progress: float, total: float | None, message: str | None) -> None:
+        notifications.append((progress, total, message))
+
+    reporter = ReasoningProgressReporter(3, 10, deliver)
+
+    async def exercise() -> None:
+        await reporter.accept_operational_status("Initial navigation")
+        await reporter.accept("model checks the report")
+        await reporter.accept_operational_status("Access")
+        await reporter.accept("discarded")
+        await reporter.flush()
+
+    asyncio.run(exercise())
+
+    assert reporter.accepted_item_count == 3
+    assert notifications == [
+        (1, 3, "[status] Initial navigation"),
+        (3, 3, "model checks the report\n[status] Access"),
+    ]
+
+
+def test_reconstruction_reasoning_is_forwarded_without_orchestration_serializing_checkpoint() -> (
+    None
+):
+    """The shared stream preserves model text that refers to its reconstruction context."""
+
+    notifications: list[str | None] = []
+
+    async def deliver(progress: float, total: float | None, message: str | None) -> None:
+        notifications.append(message)
+
+    reporter = ReasoningProgressReporter(0, 0, deliver)
+
+    asyncio.run(reporter.accept("Checkpoint says the report heading must be visible."))
+
+    assert notifications == ["Checkpoint says the report heading must be visible."]
+
+
 def test_positive_interval_coalesces_then_flushes_pending_text() -> None:
     """Positive intervals coalesce normal notifications while end-of-turn flush bypasses delay."""
 

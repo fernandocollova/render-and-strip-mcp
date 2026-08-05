@@ -45,6 +45,9 @@ def test_settings_apply_documented_defaults() -> None:
     assert settings.server.port == 8000
     assert settings.llm.max_output_tokens == 1024
     assert settings.agent.allow_plain_http is False
+    assert settings.agent.max_model_turns == 12
+    assert settings.agent.max_browser_actions == 30
+    assert settings.agent.page_settle_seconds == 0
     assert settings.agent.cleanup_timeout_seconds == 10
     assert settings.output.max_html_bytes == 0
     assert settings.progress.reasoning_progress_max_items == 0

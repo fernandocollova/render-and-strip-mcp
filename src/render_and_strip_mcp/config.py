@@ -54,7 +54,7 @@ class AgentSettings(StrictSettingsModel):
     navigation_timeout_seconds: PositiveSeconds = 20
     browser_action_timeout_seconds: PositiveSeconds = 15
     model_request_timeout_seconds: PositiveSeconds = 90
-    page_settle_seconds: NonNegativeSeconds = 2
+    page_settle_seconds: NonNegativeSeconds = 0
     cleanup_timeout_seconds: PositiveSeconds = 10
 
 

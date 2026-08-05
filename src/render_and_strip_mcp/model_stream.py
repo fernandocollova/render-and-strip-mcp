@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import litellm
 
@@ -18,11 +18,12 @@ ReasoningHandler = Callable[[str], Awaitable[None]]
 
 @dataclass(frozen=True)
 class RequestedToolCall:
-    """One complete model-requested browser tool call."""
+    """One complete model-requested remote action or local stage completion."""
 
     model_tool_name: str
     call_id: str
     arguments: dict[str, Any]
+    kind: Literal["remote", "completion"] = "remote"
 
 
 @dataclass(frozen=True)
@@ -143,7 +144,14 @@ class _ToolCallState:
             )
         if not self.call_id or not self.model_tool_name or self.argument_parts is None:
             raise ModelStreamError("Model stream contains an incomplete tool call.")
-        if self.model_tool_name not in tool_catalog.remote_name_by_model_name:
+        if self.model_tool_name in tool_catalog.remote_name_by_model_name:
+            tool_kind: Literal["remote", "completion"] = "remote"
+        elif (
+            tool_catalog.completion_tool is not None
+            and self.model_tool_name == tool_catalog.completion_tool.name
+        ):
+            tool_kind = "completion"
+        else:
             raise ModelStreamError(f"Model requested unknown tool {self.model_tool_name!r}.")
         try:
             decoded_arguments = json.loads("".join(self.argument_parts))
@@ -155,6 +163,7 @@ class _ToolCallState:
             model_tool_name=self.model_tool_name,
             call_id=self.call_id,
             arguments=decoded_arguments,
+            kind=tool_kind,
         )
 
 

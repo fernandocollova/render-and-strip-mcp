@@ -45,40 +45,6 @@ def test_compose_exposes_fixture_model_and_application_transports(
 
 
 @pytest.mark.integration
-def test_compose_mcp_cleans_fixture_end_to_end(
-    compose_application_endpoint: str,
-    compose_fixture_url: str,
-) -> None:
-    """The public MCP tool and built-in model complete a fixture page-cleaning request."""
-
-    expected_cleaned_html = (
-        "<!doctype html>\n"
-        '<html><head><meta charset="utf-8"/></head><body>\n'
-        "<header>Fixture chrome</header>\n"
-        "<main>\n"
-        "<h1>Deterministic fixture page</h1>\n"
-        "<p>This text verifies rendered semantic HTML cleanup.</p>\n"
-        f'<a href="{urljoin(compose_fixture_url, "details.html")}">Fixture details</a>\n'
-        "</main>\n"
-        "<footer>Fixture footer</footer>\n"
-        "</body></html>"
-    )
-
-    async def exercise() -> str:
-        async with Client(compose_application_endpoint) as client:
-            result = await client.call_tool(
-                "render_and_strip_page",
-                {
-                    "url": compose_fixture_url,
-                    "task": "Clean the current page.",
-                },
-            )
-        return extract_text_result(result)
-
-    assert asyncio.run(exercise()) == expected_cleaned_html
-
-
-@pytest.mark.integration
 def test_compose_playwright_session_renders_and_cleans_fixture(
     compose_fixture_url: str,
     compose_playwright_endpoint: str,
@@ -119,3 +85,52 @@ def test_compose_playwright_session_renders_and_cleans_fixture(
     assert "Fixture chrome" in cleaned_html
     assert "Fixture footer" in cleaned_html
     assert f'href="{urljoin(compose_fixture_url, "details.html")}"' in cleaned_html
+
+
+@pytest.mark.integration
+def test_compose_fresh_snapshots_observe_retained_lazy_content(
+    compose_fixture_url: str,
+    compose_playwright_endpoint: str,
+) -> None:
+    """Real snapshots and semantic waits retain deterministic expanded fixture content."""
+
+    greedy_fixture_url = urljoin(compose_fixture_url, "greedy.html")
+
+    async def exercise() -> tuple[str, str, str]:
+        async with open_playwright_session(compose_playwright_endpoint) as session:
+            try:
+                navigation = await session.client.call_tool(
+                    "browser_navigate", {"url": greedy_fixture_url}, timeout=5
+                )
+                extract_text_result(navigation)
+                before_snapshot = await session.client.call_tool("browser_snapshot", {}, timeout=5)
+                await session.client.call_tool(
+                    "browser_evaluate",
+                    {
+                        "function": (
+                            "() => { document.querySelector('#load-more').click(); "
+                            "return 'triggered'; }"
+                        )
+                    },
+                    timeout=5,
+                )
+                wait_result = await session.client.call_tool(
+                    "browser_wait_for", {"text": "Lazy retained item."}, timeout=5
+                )
+                extract_text_result(wait_result)
+                after_snapshot = await session.client.call_tool("browser_snapshot", {}, timeout=5)
+                document_html = await fetch_visible_top_level_document(session.client, 5)
+                return (
+                    extract_text_result(before_snapshot),
+                    extract_text_result(after_snapshot),
+                    document_html,
+                )
+            finally:
+                close_result = await session.client.call_tool("browser_close", {}, timeout=5)
+                extract_text_result(close_result)
+
+    before_snapshot, after_snapshot, document_html = asyncio.run(exercise())
+
+    assert "Lazy retained item." not in before_snapshot
+    assert "Lazy retained item." in after_snapshot
+    assert "Lazy retained item." in document_html

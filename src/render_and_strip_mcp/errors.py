@@ -21,3 +21,31 @@ class ModelStreamError(BrowserAgentError):
 
 class ExecutionLimitError(BrowserAgentError):
     """A configured browser-agent execution limit was exceeded."""
+
+
+class StageCompletionError(BrowserAgentError):
+    """A model-guided stage did not provide a valid required completion report."""
+
+
+class MissingStageCompletionError(StageCompletionError):
+    """A model stage stopped without calling its required local completion tool."""
+
+
+class MalformedStageCompletionError(StageCompletionError):
+    """A local completion-tool payload failed its strict stage schema."""
+
+
+class UnknownDiscoveryStrategyError(StageCompletionError):
+    """Discovery could not establish a supported retained-document strategy."""
+
+
+class UnsupportedCollectionStrategyError(StageCompletionError):
+    """The selected collection strategy has no implementation."""
+
+
+class UnsuccessfulStageOutcomeError(StageCompletionError):
+    """A stage reported an explicitly unsuccessful terminal result."""
+
+
+class StageToolCollisionError(StageCompletionError):
+    """A remote Playwright tool conflicts with a local stage completion tool."""

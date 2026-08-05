@@ -11,6 +11,7 @@ import render_and_strip_mcp.model_stream as model_stream
 from render_and_strip_mcp.config import LlmSettings
 from render_and_strip_mcp.errors import ModelStreamError
 from render_and_strip_mcp.playwright_tools import ToolCatalog
+from render_and_strip_mcp.stage_models import ACCESS_COMPLETION_TOOL
 
 
 def llm_settings() -> LlmSettings:
@@ -115,6 +116,57 @@ def test_stream_accumulates_fragmented_tool_call_and_fixed_parameters(
     assert "reasoning_effort" not in observed
     assert "seed" not in observed
     assert "response_format" not in observed
+
+
+def test_stream_routes_local_completion_call_separately_from_remote_actions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The stream parser preserves the execution route selected by a validated tool name."""
+
+    async def fake_acompletion(**kwargs: object) -> AsyncIterator[dict[str, object]]:
+        return chunks(
+            [
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": "call-1",
+                                        "function": {
+                                            "name": "complete_access",
+                                            "arguments": (
+                                                '{"target_state":"ready",'
+                                                '"reconstruction_instructions":[],'
+                                                '"verification":["visible"]}'
+                                            ),
+                                        },
+                                    }
+                                ]
+                            },
+                            "finish_reason": "tool_calls",
+                        }
+                    ]
+                }
+            ]
+        )
+
+    monkeypatch.setattr(model_stream.litellm, "acompletion", fake_acompletion)
+
+    result = asyncio.run(
+        model_stream.stream_model_turn(
+            llm_settings(),
+            ToolCatalog([], {"browser_click": "browser_click"}).with_completion_tool(
+                ACCESS_COMPLETION_TOOL
+            ),
+            [],
+        )
+    )
+
+    assert result.tool_call is not None
+    assert result.tool_call.kind == "completion"
+    assert result.tool_call.model_tool_name == "complete_access"
 
 
 @pytest.mark.parametrize(
