@@ -1,0 +1,71 @@
+services:
+  playwright-mcp:
+    image: mcr.microsoft.com/playwright/mcp:v0.0.78@sha256:3d871c22ea2d4cca0966e2cfb1860e1cb03eb7353725a3d6cffd133296fb04eb
+    init: true
+    command:
+      - --isolated
+      - --port
+      - "8931"
+      - --host
+      - 0.0.0.0
+      - --allowed-hosts
+      - "*"
+    ports:
+      - "8931:8931"
+
+  llama-cpp:
+    build:
+      context: ./docker/llama-cpp
+      args:
+        - MODEL_URL
+        - MODEL_SHA256
+    image: render-and-strip-llama-cpp:b10273-qwen2.5-0.5b-q4-k-m
+    labels:
+      org.opencontainers.image.version: b10273
+    command:
+      - -m
+      - /models/model.gguf
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --ctx-size
+      - ${LLAMA_CONTEXT_SIZE:-8192}
+      - --jinja
+    ports:
+      - "8080:8080"
+
+  test-site:
+    image: python:3.13.11-alpine3.22
+    command: ["python", "-m", "http.server", "8081", "--directory", "/site"]
+    volumes:
+      - ./tests/integration/fixtures/site:/site:ro
+    ports:
+      - "8081:8081"
+
+  app:
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile
+    working_dir: /workspace
+    user: devcontainer
+    command: >-
+      uv run render-and-strip-mcp examples/devcontainer.toml
+    volumes:
+      - .:/workspace
+    depends_on:
+      - playwright-mcp
+      - llama-cpp
+      - test-site
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import socket; socket.create_connection(('127.0.0.1', 8000), 2).close()"
+      interval: 2s
+      timeout: 2s
+      retries: 20
+      start_period: 30s
