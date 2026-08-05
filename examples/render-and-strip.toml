@@ -19,7 +19,7 @@ total_timeout_seconds = 600
 navigation_timeout_seconds = 20
 browser_action_timeout_seconds = 15
 model_request_timeout_seconds = 90
-page_settle_seconds = 2
+page_settle_seconds = 0
 cleanup_timeout_seconds = 10
 
 [output]

@@ -6,10 +6,10 @@
 render_and_strip_page(url, task) -> clean semantic HTML
 ```
 
-For each request it opens a fresh isolated session with an official Playwright MCP server, lets a
-tool-calling model carry out the task, validates the final top-level origin, and returns only a
-cleaned semantic HTML document containing safe visible whole-page text. Failures are MCP tool
-errors; partial HTML is never returned.
+For each request it opens a fresh isolated session with an official Playwright MCP server, uses a
+tool-calling model to reach the requested page or view and greedily retain its revealable content,
+validates the final top-level origin, and returns only a cleaned semantic HTML document containing
+safe visible whole-page text. Failures are MCP tool errors; partial HTML is never returned.
 
 ## Requirements
 
@@ -18,7 +18,8 @@ errors; partial HTML is never returned.
   and **without** `--shared-browser-context`. The Compose deployment below is the tested setup.
 - An OpenAI-compatible chat endpoint accepted by LiteLLM. Its model must support streamed chat
   function tools, `tool_choice="auto"`, sequential tool calls, `temperature=0`, and `max_tokens`.
-  Provider reasoning output is optional and is never sent as a model request parameter.
+  It must reliably call each stage's required completion tool; provider reasoning output is optional
+  and is never sent as a model request parameter.
 
 Install the application and development tools:
 
@@ -55,13 +56,43 @@ it.
 - `allow_plain_http` defaults to `false`; only HTTPS initial URLs are accepted by default. Enable
   it only for trusted local HTTP fixtures.
 - Default execution limits are 12 model turns, 30 browser actions, 600 total seconds, 20
-  navigation seconds, 15 action seconds, 90 model-request seconds, a 2-second settle delay, and
-  10 cleanup seconds.
+  navigation seconds, 15 action seconds, 90 model-request seconds, a 0-second optional settle
+  grace, and 10 cleanup seconds. The model-turn and browser-action limits apply independently to
+  each of access, discovery, reconstruction, and collection; total time remains invocation-wide.
+  Navigation calls use the navigation timeout, while each other browser operation (tab handling,
+  URL checks, snapshots, actions, and final extraction) uses its own action timeout.
 - `max_html_bytes = 0` permits unlimited clean HTML. A positive overage is an error, not a
   truncation.
 - Optional reasoning progress uses `reasoning_progress_max_items = 0` and
-  `reasoning_progress_min_interval_seconds = 0` for unlimited, immediate forwarding. Reasoning is
-  reported only when the provider streams `reasoning_content` and the MCP caller accepts progress.
+  `reasoning_progress_min_interval_seconds = 0` for unlimited, immediate forwarding. These existing
+  settings govern one shared stream of provider `reasoning_content` and labelled operational
+  milestones; milestones consume the same configured item allowance. Progress is sent only when
+  the MCP caller accepts it.
+
+### Greedy page/view retrieval
+
+`render_and_strip_page` always uses a four-stage greedy pipeline; there is no public opt-out. The
+access stage establishes a semantic page/view checkpoint rather than extracting individual facts.
+Discovery inspects and, when safe, probes reveal mechanisms and records evidence. It supports only
+the `retained-final-document` strategy: relevant content must coexist in the final visible document.
+Unsafe, ambiguous, replacing, virtualized, mixed, unsupported, or unproven behavior is `unknown`
+and fails without a reset, collection, partial result, or HTML output.
+
+After discovery, the service navigates the original tab in the same browser context to the exact
+caller URL and reconstructs the checkpoint semantically from fresh controls. It does not replay
+element references or discovery history. Collection exhausts retainable scrolling/lazy additions,
+additive controls, and expansions that can remain open together. When observations show pending
+effects, the model must use a semantic wait or investigation action before completion. A feed that
+continues to reveal relevant content until a configured stage or total limit is reached fails rather
+than returning an incomplete document.
+
+Every model-directed action is followed by an orchestration-owned fresh `browser_snapshot` after
+the optional settle grace. The service restores the original tab and enforces the origin established
+by initial navigation before each snapshot and once more before final extraction. Only after a
+complete collection report does it retrieve the visible top-level DOM once and apply the existing
+cleaner policy. Cleaning may intentionally omit DOM content under its visibility, element,
+attribute, and size policies; the service does not perform fine-grained fact extraction, verify
+facts after cleaning, or return partial or multi-document results.
 
 ## Tested local dependency stack
 
@@ -133,10 +164,10 @@ uv run ruff format --check .
 uv run pytest
 ```
 
-The local Compose stack validates transport and browser compatibility. A live browser-agent
-end-to-end integration test additionally requires the configured llama.cpp GGUF model to reliably
-emit the required streamed tool-call protocol, so it is documented rather than run in the unit
-suite.
+The local Compose stack validates transport, browser compatibility, fresh snapshots, semantic waits,
+and final-DOM visibility retention. A live browser-agent end-to-end integration test additionally
+requires the configured llama.cpp GGUF model to reliably emit all staged completion-tool calls, so
+it is documented rather than run in the deterministic suite.
 
 ## Tested compatibility pins
 
@@ -147,6 +178,6 @@ Pydantic Settings 2.14.2, Beautiful Soup 4.14.3, pytest 9.0.2, and Ruff 0.15.1. 
 The tested browser contract is `@playwright/mcp` 0.0.78 at Streamable HTTP path `/mcp`, deployed
 as `mcr.microsoft.com/playwright/mcp:v0.0.78@sha256:3d871c22ea2d4cca0966e2cfb1860e1cb03eb7353725a3d6cffd133296fb04eb`.
 The service requires `browser_navigate(url)`, `browser_tabs(action, index?, url?)`,
-`browser_evaluate(function, element?, target?, filename?)`, and `browser_close()`. The pinned
-llama.cpp model image uses release b10273 at
+`browser_snapshot(target?, depth?, boxes?, filename?)`, `browser_evaluate(function, element?,
+target?, filename?)`, and `browser_close()`. The pinned llama.cpp model image uses release b10273 at
 `ghcr.io/ggml-org/llama.cpp@sha256:14ab06c571008509adcedf635301edfa98071b1b8345269921d31ea4d519ae47`.
