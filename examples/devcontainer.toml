@@ -6,7 +6,7 @@ port = 8000
 endpoint = "http://playwright-mcp:8931/mcp"
 
 [llm]
-model = "Qwen2.5-0.5B-Instruct"
+model = "openai/Qwen2.5-0.5B-Instruct"
 api_base = "http://llama-cpp:8080/v1"
 api_key = "devcontainer-local-model"
 

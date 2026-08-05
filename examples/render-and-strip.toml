@@ -6,7 +6,7 @@ port = 8000
 endpoint = "https://playwright-mcp.example/mcp"
 
 [llm]
-model = "openai-compatible/model-name"
+model = "openai/model-name"
 api_base = "https://model.example/v1"
 api_key = "replace-with-an-environment-secret"
 max_output_tokens = 1024

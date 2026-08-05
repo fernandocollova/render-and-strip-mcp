@@ -2,7 +2,7 @@
 endpoint = "http://localhost:8931/mcp"
 
 [llm]
-model = "local-model"
+model = "openai/local-model"
 api_base = "http://localhost:8080/v1"
 api_key = "not-used-by-local-llama-cpp"
 

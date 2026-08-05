@@ -39,7 +39,7 @@ come from nested environment variables, for example:
 
 ```bash
 export RENDER_AND_STRIP_MCP_PLAYWRIGHT_MCP__ENDPOINT=https://playwright-mcp.example/mcp
-export RENDER_AND_STRIP_MCP_LLM__MODEL=openai-compatible/model-name
+export RENDER_AND_STRIP_MCP_LLM__MODEL=openai/model-name
 export RENDER_AND_STRIP_MCP_LLM__API_BASE=https://model.example/v1
 export RENDER_AND_STRIP_MCP_LLM__API_KEY=replace-with-a-secret
 uv run render-and-strip-mcp
