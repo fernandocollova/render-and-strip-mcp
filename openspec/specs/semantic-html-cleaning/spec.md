@@ -31,18 +31,22 @@ The cleaner SHALL retain whole-page textual semantic content that is not hidden 
 - **THEN** the clean HTML retains that content as part of the whole page
 
 ### Requirement: Non-textual and presentation cleanup
-The cleaner SHALL remove scripts, stylesheet and style elements, inline event handlers, animation-related presentation data, media and graphical elements, forms and controls, comments, generic presentation attributes, `<base>`, refresh metadata, and other executable or non-text content. It SHALL remove navigation and aside elements, elements with navigation/banner/contentinfo/complementary roles, and page-level headers/footers outside `main` or `article`. It SHALL unwrap generic layout elements and headers/footers inside `main` or `article` while retaining their textual descendants. Before removing an image with non-empty alternative text, it SHALL replace it with plain text in the form `[Image: <alt text>]`.
+The cleaner SHALL remove scripts, stylesheet and style elements, inline event handlers, animation-related presentation data, media and graphical elements, comments, `<base>`, refresh metadata, and other executable or non-text content. It SHALL remove form-control values and selectable-option text, including input, textarea, select, option, datalist, and progress elements. It SHALL retain visible textual descendants of form, fieldset, label, legend, button, output, and dialog elements by unwrapping those elements rather than deleting their descendants. It SHALL retain visible text in navigation, aside, header, footer, and elements with navigation/banner/contentinfo/complementary roles; page structure alone SHALL NOT cause their text to be removed. Before removing an image with non-empty alternative text, it SHALL replace it with plain text in the form `[Image: <alt text>]`.
+
+#### Scenario: Visible whole-page text is retained
+- **WHEN** the final document contains visible page header, navigation, aside, main content, footer, a role-based landmark, and text-bearing form descendants
+- **THEN** the returned HTML retains their readable text while excluding form-control values and selectable-option text
 
 #### Scenario: Styled media-rich page is cleaned
-- **WHEN** the final document contains CSS, JavaScript, video, images, canvases, SVG, forms, controls, navigation, and visible article text
-- **THEN** the returned HTML excludes the presentation, media, executable, and page-chrome elements while retaining the article text structure
+- **WHEN** the final document contains CSS, JavaScript, video, images, canvases, SVG, forms, controls, navigation, and visible page text
+- **THEN** the returned HTML excludes executable, presentation, media, graphical, and form-value content while retaining visible textual page content, including navigation and form labels
 
 ### Requirement: Deterministic semantic document serialization
-The cleaner SHALL parse with Beautiful Soup's Python built-in `html.parser` and return `<!doctype html>` followed by an `html/head/body` document with UTF-8 metadata and a textual title when present. Outside the required document skeleton it SHALL allow only `main`, `article`, `section`, `h1` through `h6`, `p`, `br`, `hr`, `blockquote`, `pre`, `code`, `ul`, `ol`, `li`, `dl`, `dt`, `dd`, `details`, `summary`, `table`, `caption`, `thead`, `tbody`, `tfoot`, `tr`, `th`, `td`, `a`, `strong`, `em`, `b`, `i`, `u`, `s`, `small`, `sub`, `sup`, `abbr`, `time`, `address`, `kbd`, `samp`, `var`, `mark`, `q`, and `cite`. Disallowed generic layout tags SHALL be unwrapped when their textual descendants are retained. The cleaner SHALL remove all attributes except sanitized link `href` and `title`, table-cell `colspan`, `rowspan`, and `scope`, `datetime` on time elements, and semantic `title` on abbreviation elements.
+The cleaner SHALL parse with Beautiful Soup's Python built-in `html.parser` and return `<!doctype html>` followed by an `html/head/body` document with UTF-8 metadata and a textual title when present. Outside the required document skeleton it SHALL allow only `main`, `article`, `section`, `header`, `footer`, `nav`, `aside`, `h1` through `h6`, `p`, `br`, `hr`, `blockquote`, `pre`, `code`, `ul`, `ol`, `li`, `dl`, `dt`, `dd`, `details`, `summary`, `table`, `caption`, `thead`, `tbody`, `tfoot`, `tr`, `th`, `td`, `a`, `strong`, `em`, `b`, `i`, `u`, `s`, `small`, `sub`, `sup`, `abbr`, `time`, `address`, `kbd`, `samp`, `var`, `mark`, `q`, and `cite`. Disallowed generic layout tags and text-bearing form containers SHALL be unwrapped when their readable descendants are retained. The cleaner SHALL remove all attributes except sanitized link `href` and `title`, table-cell `colspan`, `rowspan`, and `scope`, `datetime` on time elements, and semantic `title` on abbreviation elements.
 
-#### Scenario: Complete document is serialized
-- **WHEN** visible semantic content is cleaned from a rendered page with a title
-- **THEN** the result contains a doctype, UTF-8 `html/head/body` skeleton, title, and only allowed semantic elements and attributes
+#### Scenario: Complete whole-page document is serialized
+- **WHEN** a rendered page contains a title and visible textual landmark elements
+- **THEN** the result contains a doctype, UTF-8 `html/head/body` skeleton, title, the allowed semantic landmark elements, and only allowed attributes
 
 ### Requirement: Link destination sanitization
 The cleaner SHALL resolve relative link destinations against the final page URL. It SHALL retain fragment, HTTPS, `mailto:`, and `tel:` destinations, and SHALL retain HTTP destinations only when plain HTTP is enabled. It SHALL remove destinations using other schemes, embedded credentials, malformed URLs, `<base>` behavior, or executable values while preserving readable link text. If a link has no readable text and has an `aria-label`, the cleaner SHALL use that label as link text and remove the attribute.
