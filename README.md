@@ -54,8 +54,6 @@ it.
 
 - `allow_plain_http` defaults to `false`; only HTTPS initial URLs are accepted by default. Enable
   it only for trusted local HTTP fixtures.
-- `max_concurrent_invocations = 0` is unlimited. A positive value bounds active isolated browser
-  sessions.
 - Default execution limits are 12 model turns, 30 browser actions, 600 total seconds, 20
   navigation seconds, 15 action seconds, 90 model-request seconds, a 2-second settle delay, and
   10 cleanup seconds.

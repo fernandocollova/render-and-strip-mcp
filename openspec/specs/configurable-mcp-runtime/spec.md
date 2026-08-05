@@ -16,7 +16,7 @@ The application SHALL load a top-level Pydantic settings model from an optional 
 - **THEN** the application applies in-code defaults and environment values and either starts with a valid settings model or fails through Pydantic validation for missing required fields
 
 ### Requirement: External dependency configuration
-The application SHALL configure the FastMCP HTTP bind settings, official Playwright MCP HTTP endpoint, LiteLLM model identifier, OpenAI-compatible API base URL, model credentials, maximum output tokens, execution and cleanup limits, optional HTML byte limit, reasoning-progress maximum items, reasoning-progress minimum interval, plain-HTTP permission, and maximum concurrent invocation limit through settings. The maximum output-token setting SHALL default to 1024, cleanup timeout SHALL default to 10 seconds, and both reasoning-progress settings SHALL default to `0`. Application code SHALL NOT hardcode Docker Compose hostnames, ports, or model paths.
+The application SHALL configure the FastMCP HTTP bind settings, official Playwright MCP HTTP endpoint, LiteLLM model identifier, OpenAI-compatible API base URL, model credentials, maximum output tokens, execution and cleanup limits, optional HTML byte limit, reasoning-progress maximum items, reasoning-progress minimum interval, and plain-HTTP permission through settings. The maximum output-token setting SHALL default to 1024, cleanup timeout SHALL default to 10 seconds, and both reasoning-progress settings SHALL default to `0`. Application code SHALL NOT hardcode Docker Compose hostnames, ports, or model paths. The application SHALL NOT expose a maximum concurrent invocation setting.
 
 #### Scenario: Non-Compose endpoint configuration
 - **WHEN** a deployment supplies reachable compatible official Playwright MCP and model HTTP endpoints through settings
@@ -49,15 +49,11 @@ The repository SHALL provide a devcontainer configuration that uses the Compose 
 - **THEN** the application and its supporting Compose services start and the application MCP endpoint is reachable through the forwarded port
 
 ### Requirement: Configurable request policy
-The application SHALL reject plain-HTTP page URLs by default and allow them only when the plain-HTTP setting is enabled. It SHALL support a maximum concurrent invocation setting where `0` means no application-imposed concurrency limit and a positive value limits simultaneous browser-agent sessions.
+The application SHALL reject plain-HTTP page URLs by default and allow them only when the plain-HTTP setting is enabled. It SHALL NOT impose an application-level limit on simultaneous browser-agent sessions.
 
 #### Scenario: Default request policy
-- **WHEN** plain-HTTP permission and maximum concurrent invocations are not configured
-- **THEN** plain-HTTP page URLs are rejected and the application imposes no concurrency cap
-
-#### Scenario: Positive concurrency limit
-- **WHEN** the maximum concurrent invocation setting is a positive value and that many browser-agent sessions are active
-- **THEN** the server does not start another browser-agent session until a slot is available
+- **WHEN** plain-HTTP permission is not configured
+- **THEN** plain-HTTP page URLs are rejected and the application does not queue browser-agent sessions behind an application-level concurrency cap
 
 ### Requirement: Browser isolation deployment prerequisite
 The README SHALL state that the application assumes the configured remote official Playwright MCP server uses isolated browser contexts and does not enable shared browser contexts. It SHALL identify the Compose configuration with `--isolated` and without `--shared-browser-context` as the tested setup.

@@ -13,7 +13,6 @@ max_output_tokens = 1024
 
 [agent]
 allow_plain_http = false
-max_concurrent_invocations = 0
 max_model_turns = 12
 max_browser_actions = 30
 total_timeout_seconds = 600

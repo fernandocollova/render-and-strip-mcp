@@ -126,7 +126,7 @@ The server SHALL track the tab used for initial navigation as the only page elig
 - **THEN** the server does not return the downloaded content and continues tracking the initial top-level page
 
 ### Requirement: Bounded agent execution
-The server SHALL enforce configurable limits for model turns, browser actions, total invocation time, per-navigation time, per-browser-action time, per-model-request time, post-action page-settle time, and cleanup time. The defaults SHALL be 12 model turns, 30 browser actions, 600 total seconds, 20 navigation seconds, 15 browser-action seconds, 90 model-request seconds, 2 settle seconds, and 10 cleanup seconds. Total time SHALL begin before concurrency acquisition and include queueing, agent work, settling, extraction, and cleaning. Cleanup SHALL run once in a cancellation-shielded `finally` block and MAY extend execution only by its cleanup timeout.
+The server SHALL enforce configurable limits for model turns, browser actions, total invocation time, per-navigation time, per-browser-action time, per-model-request time, post-action page-settle time, and cleanup time. The defaults SHALL be 12 model turns, 30 browser actions, 600 total seconds, 20 navigation seconds, 15 browser-action seconds, 90 model-request seconds, 2 settle seconds, and 10 cleanup seconds. Total time SHALL begin when browser-agent invocation processing begins and include validation, browser and model work, settling, extraction, and cleaning. Cleanup SHALL run once in a cancellation-shielded `finally` block and MAY extend execution only by its cleanup timeout.
 
 #### Scenario: Browser action limit is exceeded
 - **WHEN** the agent requests more browser actions than the configured maximum
@@ -136,9 +136,9 @@ The server SHALL enforce configurable limits for model turns, browser actions, t
 - **WHEN** the model finishes without a tool call before any configured limit expires
 - **THEN** the server proceeds to final-page extraction
 
-#### Scenario: Request waits for concurrency
-- **WHEN** a request waits for a configured concurrency slot
-- **THEN** that wait consumes its total invocation time budget and responds to cancellation
+#### Scenario: Browser-agent processing starts
+- **WHEN** a valid tool invocation begins browser-agent processing
+- **THEN** the server starts its isolated browser session without waiting for an application-level concurrency slot
 
 #### Scenario: Cleanup follows timeout or cancellation
 - **WHEN** processing fails, times out, or is cancelled
