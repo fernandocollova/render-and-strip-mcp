@@ -1,7 +1,5 @@
-## Purpose
+## MODIFIED Requirements
 
-Provide browser-agent-guided rendering of a page and return only its cleaned final HTML.
-## Requirements
 ### Requirement: Render-and-strip MCP tool input and result
 The MCP server SHALL expose a Streamable HTTP tool named `render_and_strip_page` that accepts a non-empty HTTP(S) initial URL and non-empty natural-language browser task. It SHALL reject a plain-HTTP URL by default and accept it only when `allow_plain_http` is enabled. It SHALL always reject URL schemes other than HTTP(S). On success, the tool SHALL return only the cleaned HTML string produced after successful greedy retained-final-document collection. On failure, the tool SHALL return an MCP tool error and SHALL NOT return partial HTML.
 
@@ -52,32 +50,6 @@ The tool SHALL use a new FastMCP client session to connect to the configured HTT
 - **WHEN** two `render_and_strip_page` invocations use the configured isolated Playwright MCP server
 - **THEN** the second invocation cannot observe pages, cookies, or web storage created by the first invocation
 
-### Requirement: LiteLLM browser-agent invocation
-The server SHALL obtain the LiteLLM model identifier, OpenAI-compatible API base URL, API key, and maximum output-token setting from runtime configuration. The maximum output-token setting SHALL default to 1024 and SHALL bound each inner model turn. Every inner model request SHALL set `stream=True`, eligible Playwright callable tools, `tool_choice="auto"`, `temperature=0`, `parallel_tool_calls=False`, and `num_retries=0`. The server SHALL omit provider-specific optional parameters including reasoning effort, seed, and response format. The configured endpoint SHALL support OpenAI-compatible streamed chat function-tool calls with those parameters.
-
-#### Scenario: Default model turn configuration
-- **WHEN** the application creates an inner model request without an overridden maximum output-token setting
-- **THEN** it requests at most 1024 output tokens, streams the response, enables automatic sequential tool selection, uses zero temperature, and does not retry the request
-
-#### Scenario: Provider emits no reasoning
-- **WHEN** the configured model supports tool calling but does not support a provider-specific reasoning parameter
-- **THEN** the application does not send a reasoning parameter and continues the browser-agent loop normally
-
-#### Scenario: Model stream does not complete normally
-- **WHEN** a streamed model turn is interrupted, reaches its output-token limit, contains malformed or incomplete tool-call data, requests an unknown tool, returns invalid JSON arguments, returns multiple tool calls, or ends for a reason other than normal completion
-- **THEN** the tool returns an MCP tool error without extracting or returning HTML
-
-### Requirement: Dependency error propagation
-The server SHALL map LiteLLM context-window exceptions to a context-exhausted MCP tool error, other LiteLLM/OpenAI exceptions to an MCP tool error containing the dependency message, and remote FastMCP `ToolError` exceptions to an MCP tool error containing the remote message. Unexpected exceptions SHALL use FastMCP's normal error conversion. No dependency error SHALL produce partial HTML.
-
-#### Scenario: Remote Playwright tool fails
-- **WHEN** the FastMCP client raises `ToolError` for a Playwright MCP call
-- **THEN** the outer tool fails with an MCP tool error containing the remote error text and performs cleanup
-
-#### Scenario: Model provider fails
-- **WHEN** LiteLLM raises an OpenAI-compatible provider exception
-- **THEN** the outer tool fails with an MCP tool error containing the provider error text and performs cleanup
-
 ### Requirement: Compact current-page model context
 The server SHALL start every inner model turn with a fresh conversation containing exactly one stage-specific system message and one user message. The user message SHALL contain the original caller task, the current stage's explicitly permitted prior-stage input, a deterministic stage-local model-action log, the current top-level URL, and the newest fresh browser observation. Access and discovery SHALL receive no prior-stage report. Reconstruction SHALL receive the full access checkpoint. Collection SHALL receive the selected strategy through its strategy-specific instructions and SHALL NOT receive the checkpoint, discovery evidence, or reconstruction evidence. Discovery and collection turns following a browser action SHALL additionally include the immediately preceding fresh observation needed to assess whether page/view content was retained. Initial and reset navigation SHALL NOT appear in model-action logs. The system message SHALL describe only the current stage's objective and completion contract. Eligible Playwright schemas and the current stage's local completion schema SHALL be supplied through the request's `tools` parameter. For each known eligible remote tool, a tool-specific formatter SHALL record the tool name, selected structural arguments, success/failure status, and resulting current URL. It SHALL omit typed text, form values, JavaScript source, file paths, and dropped-data values completely and record only their field names and character/item counts; it SHALL NOT hard-truncate those payload strings. The server SHALL NOT use model content or optional progress to construct the action log. Except for the explicit discovery and collection comparison pair, it SHALL omit earlier raw browser observations and completed assistant/tool message pairs and SHALL NOT include an orphaned `role="tool"` message.
 
@@ -104,32 +76,6 @@ The server SHALL start every inner model turn with a fresh conversation containi
 #### Scenario: Newest observation exceeds model context
 - **WHEN** the compact stage request exceeds the configured endpoint's context capacity
 - **THEN** the tool returns a context-exhausted MCP tool error without truncating required observations or retrying with reduced history
-
-### Requirement: Post-action top-level location invariant
-The server SHALL use the documented official Playwright MCP navigation and location-evaluation capabilities to record the initial navigation's final top-level origin. After settling each browser-affecting action and immediately before extraction, it SHALL reject the invocation if the tracked page's observed top-level location differs from that origin. It SHALL reject an observed plain-HTTP location unless `allow_plain_http` is enabled. The origin comparison SHALL use scheme, host, and effective port. This requirement SHALL apply to observed post-action locations and SHALL NOT claim to restrict subresource requests or undetected intermediate locations.
-
-#### Scenario: Initial redirect establishes the origin
-- **WHEN** the initial URL redirects to a different origin before the agent begins browser actions
-- **THEN** the server records the redirected document origin as the allowed origin
-
-#### Scenario: HTTPS redirect downgrades to HTTP
-- **WHEN** an HTTPS initial URL redirects to a plain-HTTP location while `allow_plain_http` is disabled
-- **THEN** the tool returns an MCP tool error and does not return HTML
-
-#### Scenario: Agent action changes origin
-- **WHEN** a model-requested browser action changes the top-level document to a different origin after initial navigation
-- **THEN** the tool returns an MCP tool error and does not return HTML
-
-### Requirement: Secondary browser outputs are ignored
-The server SHALL track the tab used for initial navigation as the only page eligible for final DOM extraction. It SHALL reserve remote tab-management tools for internal orchestration and SHALL NOT make them available to the model. After each browser-affecting action, it SHALL reselect the original tab when a popup or new tab becomes active. A secondary tab or download SHALL not contribute to or replace the final page output. If the original tab no longer exists, the invocation SHALL fail.
-
-#### Scenario: Browser action opens a new tab
-- **WHEN** a model-requested action opens a popup or new tab
-- **THEN** the server uses internal tab management to reselect the original tab and excludes the secondary page from final extraction
-
-#### Scenario: Browser action starts a download
-- **WHEN** a model-requested action starts a download
-- **THEN** the server does not return the downloaded content and continues tracking the initial top-level page
 
 ### Requirement: Bounded agent execution
 The server SHALL enforce configurable inclusive per-stage limits for model turns and model-directed browser actions, plus configurable limits for total invocation time, per-navigation operation, other browser operations, each model request, optional post-action settle grace, and cleanup. The defaults SHALL be 12 model turns and 30 model-directed browser actions for each of access, discovery, reconstruction, and collection; 600 total seconds; 20 navigation seconds; 15 seconds for each other browser operation; 90 model-request seconds; 0 settle-grace seconds; and 10 cleanup seconds. A stage MAY submit valid local completion on its final permitted model turn. Subject to the model-turn allowance, it MAY execute exactly its configured browser-action maximum and SHALL reject an additional action before execution. If the final permitted model turn requests a browser action, the stage SHALL reject that action before execution because no turn remains for mandatory completion. Initial, reset, and model-directed navigation calls SHALL each use the navigation timeout. Other model-directed browser calls, orchestration tab operations, location evaluation, snapshots, and final extraction SHALL each independently use the browser-action timeout; these deadlines SHALL NOT form one composite action timeout. Total time SHALL begin when browser-agent invocation processing begins and include validation, every stage, reset, browser and model work, optional grace periods, extraction, and cleaning. Cleanup SHALL run once in a cancellation-shielded `finally` block and MAY extend execution only by its cleanup timeout.

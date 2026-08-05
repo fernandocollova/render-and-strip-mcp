@@ -1,7 +1,5 @@
-## Purpose
+## MODIFIED Requirements
 
-Optionally forward model reasoning as bounded, best-effort MCP progress notifications.
-## Requirements
 ### Requirement: Optional reasoning progress forwarding
 The server SHALL forward model-generated LiteLLM `reasoning_content` and SHALL additionally emit operational progress milestones for initial navigation, access, discovery, reset, reconstruction, collection, and final extraction/cleaning. It SHALL identify operational messages as status rather than model reasoning and SHALL NOT synthesize reasoning text for orchestration work. Each non-empty normalized reasoning delta and each operational milestone SHALL be one progress item. Progress availability or item boundaries SHALL NOT determine stage completion, tool calls, or browser behavior.
 
