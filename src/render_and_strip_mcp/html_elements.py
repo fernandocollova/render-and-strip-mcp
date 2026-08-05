@@ -7,6 +7,10 @@ ALLOWED_TAGS = frozenset(
         "main",
         "article",
         "section",
+        "header",
+        "footer",
+        "nav",
+        "aside",
         "h1",
         "h2",
         "h3",
@@ -56,31 +60,23 @@ ALLOWED_TAGS = frozenset(
         "cite",
     }
 )
-DROPPED_TAGS = frozenset(
+REMOVED_TAGS = frozenset(
     {
         "applet",
         "area",
         "audio",
         "base",
-        "button",
         "canvas",
         "datalist",
-        "dialog",
         "embed",
-        "fieldset",
-        "form",
         "iframe",
         "input",
-        "label",
-        "legend",
         "link",
         "map",
         "meta",
         "noscript",
         "object",
         "option",
-        "output",
-        "picture",
         "progress",
         "script",
         "select",
@@ -93,4 +89,3 @@ DROPPED_TAGS = frozenset(
         "video",
     }
 )
-PAGE_CHROME_ROLES = frozenset({"navigation", "banner", "contentinfo", "complementary"})

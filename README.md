@@ -8,7 +8,8 @@ render_and_strip_page(url, task) -> clean semantic HTML
 
 For each request it opens a fresh isolated session with an official Playwright MCP server, lets a
 tool-calling model carry out the task, validates the final top-level origin, and returns only a
-cleaned HTML document. Failures are MCP tool errors; partial HTML is never returned.
+cleaned semantic HTML document containing safe visible whole-page text. Failures are MCP tool
+errors; partial HTML is never returned.
 
 ## Requirements
 

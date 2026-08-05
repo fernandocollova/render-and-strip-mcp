@@ -21,20 +21,21 @@ def clean(source: str, *, allow_plain_http: bool = False, maximum_html_bytes: in
     )
 
 
-def test_cleaner_preserves_semantics_and_removes_chrome_and_presentation() -> None:
-    """Allowed visible semantics survive while page chrome and attributes do not."""
+def test_cleaner_preserves_semantics_and_visible_page_regions() -> None:
+    """Allowed visible semantics and landmarks survive without source attributes."""
 
     result = clean(
         """
 <html><head><title> Example title </title><style>.x { color: red }</style></head>
-<body><header>Global header</header><nav>Navigation</nav><aside>Aside</aside>
+<body><header class="global">Global header</header><nav id="navigation">Navigation</nav>
+<aside data-content="supplemental">Aside</aside><div role="contentinfo">Role landmark</div>
 <main class="layout"><header>Inside header</header><article id="content">
 <h1 onclick="bad()">Heading</h1>
 <p style="color:red">Paragraph <strong>text</strong>.</p><table><tr><th scope="col">A</th>
 <td colspan="2" rowspan="1" data-value="x">B</td></tr></table>
 <time datetime="2026-01-01">Today</time>
 <abbr title="HyperText Markup Language">HTML</abbr></article><footer>Inside footer</footer></main>
-<footer>Global footer</footer><script>alert(1)</script><form><input value="ignored"></form>
+<footer class="global">Global footer</footer><script>alert(1)</script>
 </body></html>
 """
     )
@@ -42,12 +43,18 @@ def test_cleaner_preserves_semantics_and_removes_chrome_and_presentation() -> No
 
     assert result.startswith("<!doctype html>\n<html>")
     assert document.title is not None and document.title.string == "Example title"
-    assert "Global header" not in result
-    assert "Navigation" not in result
-    assert "Aside" not in result
-    assert "Global footer" not in result
+    assert "Global header" in result
+    assert "Navigation" in result
+    assert "Aside" in result
+    assert "Role landmark" in result
+    assert "Global footer" in result
     assert "Inside header" in result
     assert "Inside footer" in result
+    assert document.header is not None and document.header.attrs == {}
+    assert document.nav is not None and document.nav.attrs == {}
+    assert document.aside is not None and document.aside.attrs == {}
+    assert document.footer is not None and document.footer.attrs == {}
+    assert document.find("div") is None
     assert document.h1 is not None and document.h1.attrs == {}
     assert document.td is not None and document.td.attrs == {"colspan": "2", "rowspan": "1"}
     assert document.th is not None and document.th.attrs == {"scope": "col"}
@@ -56,12 +63,13 @@ def test_cleaner_preserves_semantics_and_removes_chrome_and_presentation() -> No
     assert document.abbr.attrs == {"title": "HyperText Markup Language"}
 
 
-def test_cleaner_converts_images_and_scopes_output_to_top_level_content() -> None:
-    """Image alternative text survives, while iframe and declarative shadow content do not."""
+def test_cleaner_converts_picture_image_text_and_excludes_embedded_content() -> None:
+    """Picture alternative text survives, while iframe and template content do not."""
 
     result = clean(
         """
-<html><body><main><p>Before <img alt="A chart"> after <img alt=""></p>
+<html><body><main><p>Before <picture><source srcset="chart.webp"><img alt="A chart">
+</picture> after <img alt=""></p>
 <iframe srcdoc="<p>iframe secret</p>">fallback</iframe>
 <template shadowrootmode="open"><p>shadow secret</p></template></main></body></html>
 """
@@ -72,6 +80,61 @@ def test_cleaner_converts_images_and_scopes_output_to_top_level_content() -> Non
     assert "fallback" not in result
     assert "shadow secret" not in result
     assert "<img" not in result
+
+
+def test_cleaner_retains_form_text_but_excludes_form_state_and_nontext_content() -> None:
+    """Text-bearing form containers unwrap while controls and unsafe content are removed."""
+
+    result = clean(
+        """
+<html><body><main><form action="/send"><fieldset><legend>Contact us</legend>
+<label for="email">Email address <input id="email" value="secret@example.test"></label>
+<button onclick="submit()">Send message</button><output>Form ready</output>
+<textarea>Unsent private message</textarea><select><option>United Kingdom</option></select>
+<datalist><option>Suggestion</option></datalist></fieldset></form>
+<dialog open>Contact confirmation</dialog><script>script secret</script>
+<video>Video fallback</video><svg><title>Chart title</title></svg>
+<iframe srcdoc="<p>iframe secret</p>">iframe fallback</iframe>
+<template><p>template secret</p></template></main></body></html>
+"""
+    )
+    document = BeautifulSoup(result, "html.parser")
+
+    for expected_text in (
+        "Contact us",
+        "Email address",
+        "Send message",
+        "Form ready",
+        "Contact confirmation",
+    ):
+        assert expected_text in result
+    for excluded_text in (
+        "secret@example.test",
+        "Unsent private message",
+        "United Kingdom",
+        "Suggestion",
+        "script secret",
+        "Video fallback",
+        "Chart title",
+        "iframe secret",
+        "iframe fallback",
+        "template secret",
+    ):
+        assert excluded_text not in result
+    for tag_name in (
+        "form",
+        "fieldset",
+        "legend",
+        "label",
+        "button",
+        "output",
+        "dialog",
+        "input",
+        "textarea",
+        "select",
+        "option",
+    ):
+        assert document.find(tag_name) is None
 
 
 @pytest.mark.parametrize(

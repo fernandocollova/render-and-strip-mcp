@@ -54,13 +54,13 @@ def test_compose_mcp_cleans_fixture_end_to_end(
     expected_cleaned_html = (
         "<!doctype html>\n"
         '<html><head><meta charset="utf-8"/></head><body>\n'
-        "\n"
+        "<header>Fixture chrome</header>\n"
         "<main>\n"
         "<h1>Deterministic fixture page</h1>\n"
         "<p>This text verifies rendered semantic HTML cleanup.</p>\n"
         f'<a href="{urljoin(compose_fixture_url, "details.html")}">Fixture details</a>\n'
         "</main>\n"
-        "\n"
+        "<footer>Fixture footer</footer>\n"
         "</body></html>"
     )
 
@@ -116,6 +116,6 @@ def test_compose_playwright_session_renders_and_cleans_fixture(
     cleaned_html = asyncio.run(exercise())
 
     assert "Deterministic fixture page" in cleaned_html
-    assert "Fixture chrome" not in cleaned_html
-    assert "Fixture footer" not in cleaned_html
+    assert "Fixture chrome" in cleaned_html
+    assert "Fixture footer" in cleaned_html
     assert f'href="{urljoin(compose_fixture_url, "details.html")}"' in cleaned_html

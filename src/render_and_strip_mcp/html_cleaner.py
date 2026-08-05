@@ -5,7 +5,7 @@ from __future__ import annotations
 from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 
 from .errors import BrowserAgentError
-from .html_elements import ALLOWED_TAGS, DROPPED_TAGS, PAGE_CHROME_ROLES
+from .html_elements import ALLOWED_TAGS, REMOVED_TAGS
 from .link_destination import sanitize_link_destination
 
 
@@ -30,7 +30,7 @@ def clean_rendered_html(
     if source_document.head is not None:
         source_document.head.decompose()
     source_body = source_document.body or source_document
-    _remove_page_chrome(source_body)
+    _remove_nontext_content(source_body)
     _clean_semantic_tags(source_body, final_url, allow_plain_http)
     cleaned_html = _serialize_document(source_body, document_title)
     if maximum_html_bytes and len(cleaned_html.encode("utf-8")) > maximum_html_bytes:
@@ -41,28 +41,19 @@ def clean_rendered_html(
 def _document_title(document: BeautifulSoup) -> str:
     """Extract a textual input title before the source head is removed."""
 
-    if document.title is None:
+    if document.head is None:
         return ""
-    return document.title.get_text(" ", strip=True)
+    title_tag = document.head.find("title", recursive=False)
+    if title_tag is None:
+        return ""
+    return title_tag.get_text(" ", strip=True)
 
 
-def _remove_page_chrome(source_body: Tag | BeautifulSoup) -> None:
-    """Remove non-semantic page chrome while retaining in-content header/footer text."""
+def _remove_nontext_content(source_body: Tag | BeautifulSoup) -> None:
+    """Remove content that cannot be represented in safe text-only HTML."""
 
-    for tag in list(source_body.find_all(DROPPED_TAGS)):
+    for tag in list(source_body.find_all(REMOVED_TAGS)):
         tag.decompose()
-    for tag in list(source_body.find_all(["nav", "aside"])):
-        tag.decompose()
-    for tag in list(source_body.find_all(["header", "footer"])):
-        if tag.find_parent(["main", "article"]) is None:
-            tag.decompose()
-        else:
-            tag.unwrap()
-    for tag in list(source_body.find_all(True)):
-        role_value = tag.get("role")
-        role_names = role_value if isinstance(role_value, list) else str(role_value or "").split()
-        if PAGE_CHROME_ROLES.intersection(role_name.lower() for role_name in role_names):
-            tag.decompose()
 
 
 def _clean_semantic_tags(
