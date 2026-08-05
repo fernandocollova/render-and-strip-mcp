@@ -16,6 +16,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest==9.0.2",
+    "pytest-cov==7.0.0",
     "ruff==0.15.1",
 ]
 
@@ -32,10 +33,25 @@ module-root = "src"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = [
+    "-q",
+    "--cov=render_and_strip_mcp",
+    "--cov-branch",
+    "--cov-report=term-missing",
+    "--cov-report=xml:coverage.xml",
+    "--cov-fail-under=80",
+]
 markers = [
     "integration: requires running Compose infrastructure",
 ]
+
+[tool.coverage.run]
+branch = true
+source = ["render_and_strip_mcp"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
 
 [tool.ruff]
 line-length = 100
