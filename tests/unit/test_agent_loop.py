@@ -108,8 +108,8 @@ def test_model_context_internalizes_loaded_page_cleaning_guidance() -> None:
     task = "Clean the current page."
     messages = build_model_messages(task, [], "https://example.test/", "observation")
 
-    assert "service has already loaded the caller's requested initial page" in (
-        messages[0]["content"]
+    assert (
+        "service has already loaded the caller's requested initial page" in (messages[0]["content"])
     )
     assert "Do not call browser tools or functions" in messages[0]["content"]
     assert "reply exactly TASK_COMPLETE without a tool call" in messages[0]["content"]
