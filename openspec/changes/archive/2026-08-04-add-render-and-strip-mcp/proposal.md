@@ -9,7 +9,7 @@ Webpages that are rendered and explored interactively contain useful textual inf
 - Enforce a post-action top-level location invariant, apply the configured HTTPS/plain-HTTP policy, internally restore the original tab after popups, ignore downloads, and fail requests that exceed configured model, browser-action, or time limits.
 - Clean the final top-level rendered DOM into visible semantic HTML and return HTML only on success.
 - Forward provider-supplied reasoning deltas as optional MCP progress without making reasoning availability a requirement for agent execution.
-- Add Pydantic/TOML settings and Docker Compose infrastructure for the official Playwright MCP image with bundled Chromium, llama.cpp, and a deterministic Python HTTP fixture site while keeping application endpoints configurable.
+- Add Pydantic/TOML settings and Docker Compose infrastructure for the official Playwright MCP image with bundled Chromium, llama.cpp, and a deterministic Python HTTP fixture site while keeping application endpoints configurable. Build the local model image from a checksum-verified default model, require URL/hash pairs for custom models, and provide a devcontainer that starts the application with its local dependencies.
 
 ## Capabilities
 

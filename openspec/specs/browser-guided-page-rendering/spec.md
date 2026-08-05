@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Provide browser-agent-guided rendering of a page and return only its cleaned final HTML.
+
+## Requirements
 
 ### Requirement: Render-and-strip MCP tool input and result
 The MCP server SHALL expose a Streamable HTTP tool named `render_and_strip_page` that accepts a non-empty HTTP(S) initial URL and non-empty natural-language browser task. It SHALL reject a plain-HTTP URL by default and accept it only when `allow_plain_http` is enabled. It SHALL always reject URL schemes other than HTTP(S). On success, the tool SHALL return only the cleaned HTML string for the final rendered page. On failure, the tool SHALL return an MCP tool error and SHALL NOT return partial HTML.
@@ -16,7 +20,7 @@ The MCP server SHALL expose a Streamable HTTP tool named `render_and_strip_page`
 - **THEN** the tool permits initial navigation
 
 ### Requirement: Official Playwright MCP agent session
-The tool SHALL use a new FastMCP client session to connect to the configured HTTP endpoint of the documented, tested official Playwright MCP interface for each invocation. The configured remote server SHALL be launched with `--isolated` and SHALL NOT enable `--shared-browser-context`. The server SHALL reserve `browser_tabs` and `browser_close` for Python orchestration and SHALL exclude `browser_run_code_unsafe`, `browser_file_upload`, `browser_drop`, and `browser_install` from model access. It SHALL translate every remaining eligible tool's name, description, and input JSON Schema into a LiteLLM/OpenAI callable-tool schema. Name normalization SHALL be deterministic, collision-free, and reversible for remote dispatch. The agent SHALL execute model-requested remote MCP calls, update compact current-page state from their results, and continue until the model returns a normal terminal completion without another tool request. The server SHALL close the remote browser session after DOM collection or failure.
+The tool SHALL use a new FastMCP client session to connect to the configured HTTP endpoint of the documented, tested official Playwright MCP interface for each invocation. The configured remote server SHALL be launched with `--isolated` and SHALL NOT enable `--shared-browser-context`. The server SHALL reserve `browser_tabs` and `browser_close` for Python orchestration and SHALL exclude `browser_run_code_unsafe`, `browser_file_upload`, `browser_drop`, and `browser_install` from model access. It SHALL translate every remaining eligible tool's name, description, and input JSON Schema into a LiteLLM/OpenAI callable-tool schema. Every eligible remote name SHALL already be valid for an OpenAI function tool; an invalid or duplicate name SHALL fail with a clear tool error rather than receive a compatibility mapping. The agent SHALL execute model-requested remote MCP calls, update compact current-page state from their results, and continue until the model returns a normal terminal completion without another tool request. The server SHALL close the remote browser session after DOM collection or failure.
 
 #### Scenario: Model-directed browser action
 - **WHEN** the model returns a valid Playwright MCP tool call
@@ -33,6 +37,10 @@ The tool SHALL use a new FastMCP client session to connect to the configured HTT
 #### Scenario: Required official capability is absent
 - **WHEN** the connected Playwright MCP server does not provide the documented navigation, tab management, top-level location evaluation, final top-level document retrieval, or browser-close capability
 - **THEN** the tool returns a descriptive MCP tool error without returning HTML
+
+#### Scenario: Required official capability schema is incompatible
+- **WHEN** a connected Playwright MCP server publishes one of the pinned required tools with incompatible input properties, required fields, types, or enum values
+- **THEN** the tool returns a descriptive compatibility error without browser-agent execution
 
 #### Scenario: Unsupported Playwright-like MCP implementation
 - **WHEN** a configured remote MCP server does not satisfy the documented official Playwright MCP interface
