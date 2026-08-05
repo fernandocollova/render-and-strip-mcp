@@ -1,0 +1,23 @@
+{
+  "name": "render-and-strip-container-tools",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Pinned OpenSpec and OpenCode CLI tools for the development container.",
+  "engines": {
+    "node": "20.19.2",
+    "npm": "10.8.2"
+  },
+  "packageManager": "npm@10.8.2",
+  "scripts": {
+    "audit:dependencies": "npm audit --audit-level=high",
+    "audit:signatures": "npm audit signatures",
+    "opencode": "opencode",
+    "openspec": "openspec",
+    "setup:opencode": "npm_config_offline=true node ./node_modules/opencode-ai/postinstall.mjs",
+    "verify:tools": "openspec --version && opencode --version"
+  },
+  "devDependencies": {
+    "@fission-ai/openspec": "1.7.0",
+    "opencode-ai": "1.18.13"
+  }
+}

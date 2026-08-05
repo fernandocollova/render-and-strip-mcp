@@ -100,6 +100,9 @@ ipython_config.py
 #   commonly ignored for libraries.
 # uv.lock
 
+# Node.js dependencies are restored from package-lock.json.
+node_modules/
+
 # poetry
 #   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
 #   This is especially recommended for binary packages to ensure reproducibility, and is more
