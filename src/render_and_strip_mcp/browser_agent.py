@@ -46,7 +46,7 @@ class BrowserAgent:
     def __init__(
         self,
         settings: Settings,
-        reasoning_progress: ReasoningProgressReporter | None = None,
+        reasoning_progress: ReasoningProgressReporter,
     ):
         self._settings = settings
         self._reasoning_progress = reasoning_progress
@@ -69,7 +69,8 @@ class BrowserAgent:
                     )
                     session = await session_manager.__aenter__()
                     final_html = await self._run_session(session, url, task)
-            except TimeoutError as error:                raise ExecutionLimitError("Total invocation time limit exceeded.") from error
+            except TimeoutError as error:
+                raise ExecutionLimitError("Total invocation time limit exceeded.") from error
         except litellm.ContextWindowExceededError as error:
             translated_error = BrowserAgentError(f"Model context exhausted: {error}")
             primary_error = translated_error
@@ -86,8 +87,7 @@ class BrowserAgent:
             primary_error = error
             raise
         finally:
-            if self._reasoning_progress is not None:
-                await self._reasoning_progress.flush_if_needed()
+            await self._reasoning_progress.flush_if_needed()
             if session is not None:
                 try:
                     await self._close_browser(session.client)
@@ -313,8 +313,7 @@ class BrowserAgent:
     async def _report_operational_status(self, status: str) -> None:
         """Forward an orchestration milestone without presenting it as model reasoning."""
 
-        if self._reasoning_progress is not None:
-            await self._reasoning_progress.accept_operational_status(status)
+        await self._reasoning_progress.accept_operational_status(status)
 
     async def _close_browser(self, client: Client) -> None:
         """Close the isolated remote browser exactly once, shielding it from cancellation."""

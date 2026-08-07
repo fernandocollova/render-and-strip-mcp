@@ -19,6 +19,8 @@ from render_and_strip_mcp.errors import UnknownDiscoveryStrategyError
 from render_and_strip_mcp.model_stream import ModelTurn, RequestedToolCall
 from render_and_strip_mcp.playwright_tools import PlaywrightSession, ToolCatalog
 
+from .test_browser_agent import RecordingProgressReporter
+
 REPORT_URL = "https://example.test/reports"
 
 
@@ -228,7 +230,12 @@ def test_end_to_end_finite_incremental_scroll_is_retained_document(
     install_browser_session(monkeypatch, client)
     reported_strategies = install_categorizing_model(monkeypatch, "incremental")
 
-    document_html = asyncio.run(BrowserAgent(settings()).run(REPORT_URL, "Retrieve reports"))
+    document_html = asyncio.run(
+        BrowserAgent(
+            settings(),
+            RecordingProgressReporter(),  # type: ignore[arg-type]
+        ).run(REPORT_URL, "Retrieve reports")
+    )
 
     assert reported_strategies == ["retained-final-document"]
     assert "Item 1" in document_html
@@ -247,7 +254,12 @@ def test_end_to_end_numbered_replacement_pagination_is_unknown(
     reported_strategies = install_categorizing_model(monkeypatch, "numbered")
 
     with pytest.raises(UnknownDiscoveryStrategyError, match="could not establish"):
-        asyncio.run(BrowserAgent(settings()).run(REPORT_URL, "Retrieve reports"))
+        asyncio.run(
+            BrowserAgent(
+                settings(),
+                RecordingProgressReporter(),  # type: ignore[arg-type]
+            ).run(REPORT_URL, "Retrieve reports")
+        )
 
     assert reported_strategies == ["unknown"]
     assert client.navigation_count == 1

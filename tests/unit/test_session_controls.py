@@ -14,7 +14,12 @@ import render_and_strip_mcp.browser_agent as browser_agent_module
 from render_and_strip_mcp.agent_loop import StageRunResult
 from render_and_strip_mcp.errors import BrowserAgentError
 
-from .test_browser_agent import FakeBrowserClient, install_fake_session, settings
+from .test_browser_agent import (
+    FakeBrowserClient,
+    RecordingProgressReporter,
+    install_fake_session,
+    settings,
+)
 
 
 @pytest.mark.parametrize(
@@ -51,7 +56,10 @@ def test_dependency_errors_are_translated_and_cleaned_up(
 
     with pytest.raises(BrowserAgentError, match=expected_message):
         asyncio.run(
-            browser_agent_module.BrowserAgent(settings()).run("https://example.test/", "task")
+            browser_agent_module.BrowserAgent(
+                settings(),
+                RecordingProgressReporter(),  # type: ignore[arg-type]
+            ).run("https://example.test/", "task")
         )
 
     assert client.calls[-1] == ("browser_close", {})
@@ -74,7 +82,10 @@ def test_cancellation_shields_browser_cleanup(monkeypatch: pytest.MonkeyPatch) -
 
     async def exercise() -> None:
         invocation = asyncio.create_task(
-            browser_agent_module.BrowserAgent(settings()).run("https://example.test/", "task")
+            browser_agent_module.BrowserAgent(
+                settings(),
+                RecordingProgressReporter(),  # type: ignore[arg-type]
+            ).run("https://example.test/", "task")
         )
         await entered_stage.wait()
         invocation.cancel()

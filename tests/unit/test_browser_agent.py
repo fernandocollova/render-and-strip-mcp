@@ -102,6 +102,9 @@ class RecordingProgressReporter:
         self.operational_statuses: list[str] = []
         self.flush_count = 0
 
+    async def accept(self, reasoning_fragment: str) -> None:
+        """Accept model reasoning without recording it in orchestration-only tests."""
+
     async def accept_operational_status(self, status: str) -> None:
         self.operational_statuses.append(status)
 
@@ -192,7 +195,10 @@ def test_agent_runs_stages_in_order_and_extracts_once_after_collection(
     pipeline_events = install_successful_pipeline(monkeypatch)
 
     final_html = asyncio.run(
-        browser_agent_module.BrowserAgent(settings()).run("https://example.test/", "clean")
+        browser_agent_module.BrowserAgent(
+            settings(),
+            RecordingProgressReporter(),  # type: ignore[arg-type]
+        ).run("https://example.test/", "clean")
     )
 
     assert "<body>Done</body>" in final_html
@@ -238,7 +244,12 @@ def test_agent_action_restores_original_tab_and_uses_fresh_snapshot(
     install_fake_session(monkeypatch, client)
     install_successful_pipeline(monkeypatch, invoke_access_action=True)
 
-    asyncio.run(browser_agent_module.BrowserAgent(settings()).run("https://example.test/", "click"))
+    asyncio.run(
+        browser_agent_module.BrowserAgent(
+            settings(),
+            RecordingProgressReporter(),  # type: ignore[arg-type]
+        ).run("https://example.test/", "click")
+    )
 
     action_index = client.calls.index(("browser_click", {}))
     assert client.calls[action_index + 1] == ("browser_tabs", {"action": "list"})
@@ -257,7 +268,8 @@ def test_agent_applies_independent_navigation_and_action_operation_timeouts(
 
     asyncio.run(
         browser_agent_module.BrowserAgent(
-            settings(navigation_timeout_seconds=7, browser_action_timeout_seconds=3)
+            settings(navigation_timeout_seconds=7, browser_action_timeout_seconds=3),
+            RecordingProgressReporter(),  # type: ignore[arg-type]
         ).run("https://example.test/", "click")
     )
 
@@ -280,7 +292,12 @@ def test_zero_settle_grace_does_not_sleep(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(browser_agent_module.asyncio, "sleep", record_sleep)
 
-    asyncio.run(browser_agent_module.BrowserAgent(settings()).run("https://example.test/", "clean"))
+    asyncio.run(
+        browser_agent_module.BrowserAgent(
+            settings(),
+            RecordingProgressReporter(),  # type: ignore[arg-type]
+        ).run("https://example.test/", "clean")
+    )
 
     assert sleeps == []
 
@@ -298,7 +315,10 @@ def test_agent_rejects_cross_origin_fresh_action_and_still_cleans_up(
 
     with pytest.raises(BrowserAgentError, match="left the initial document origin"):
         asyncio.run(
-            browser_agent_module.BrowserAgent(settings()).run("https://example.test/", "click")
+            browser_agent_module.BrowserAgent(
+                settings(),
+                RecordingProgressReporter(),  # type: ignore[arg-type]
+            ).run("https://example.test/", "click")
         )
 
     assert client.calls[-1] == ("browser_close", {})
@@ -332,7 +352,10 @@ def test_unknown_discovery_fails_before_reset_collection_or_extraction(
 
     with pytest.raises(BrowserAgentError, match="could not establish"):
         asyncio.run(
-            browser_agent_module.BrowserAgent(settings()).run("https://example.test/", "task")
+            browser_agent_module.BrowserAgent(
+                settings(),
+                RecordingProgressReporter(),  # type: ignore[arg-type]
+            ).run("https://example.test/", "task")
         )
 
     assert [tool_name for tool_name, _ in client.calls].count("browser_navigate") == 1
@@ -373,7 +396,10 @@ def test_failed_reconstruction_fails_before_collection_or_extraction(
 
     with pytest.raises(BrowserAgentError, match="did not verify"):
         asyncio.run(
-            browser_agent_module.BrowserAgent(settings()).run("https://example.test/", "task")
+            browser_agent_module.BrowserAgent(
+                settings(),
+                RecordingProgressReporter(),  # type: ignore[arg-type]
+            ).run("https://example.test/", "task")
         )
 
     assert not any(
@@ -395,7 +421,10 @@ def test_agent_rejects_invalid_input_before_opening_session(
 
     with pytest.raises(BrowserAgentError, match="Plain HTTP"):
         asyncio.run(
-            browser_agent_module.BrowserAgent(settings()).run("http://example.test/", "task")
+            browser_agent_module.BrowserAgent(
+                settings(),
+                RecordingProgressReporter(),  # type: ignore[arg-type]
+            ).run("http://example.test/", "task")
         )
 
 
@@ -415,7 +444,10 @@ def test_cleanup_preserves_primary_failure(
 
     with pytest.raises(BrowserAgentError, match="primary failure"):
         asyncio.run(
-            browser_agent_module.BrowserAgent(settings()).run("https://example.test/", "task")
+            browser_agent_module.BrowserAgent(
+                settings(),
+                RecordingProgressReporter(),  # type: ignore[arg-type]
+            ).run("https://example.test/", "task")
         )
 
     assert "cleanup failed" in caplog.text
