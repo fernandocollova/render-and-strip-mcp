@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from .agent_context import PageState, build_stage_messages, format_browser_action
+from .agent_context import PageState, Stage, format_browser_action
 from .config import AgentSettings, LlmSettings
 from .errors import ExecutionLimitError, MissingStageCompletionError, ModelStreamError
 from .model_stream import stream_model_turn
 from .playwright_tools import ToolCatalog
 from .reasoning_progress import ReasoningProgressReporter
-from .stage_models import AccessCheckpoint, CompletionTool, DiscoveryStrategy, StageReportValue
+from .stage_models import StageReportValue
 
 BrowserAction = Callable[[str, dict[str, object]], Awaitable[PageState]]
 
@@ -25,74 +25,85 @@ class StageRunResult:
     page_state: PageState
 
 
-async def run_stage(
-    llm_settings: LlmSettings,
-    agent_settings: AgentSettings,
-    tool_catalog: ToolCatalog,
-    completion_tool: CompletionTool,
-    task: str,
-    initial_state: PageState,
-    execute_browser_action: BrowserAction,
-    reasoning_progress: ReasoningProgressReporter | None = None,
-    checkpoint: AccessCheckpoint | None = None,
-    strategy: DiscoveryStrategy | None = None,
-) -> StageRunResult:
-    """Run fresh model turns until one stage submits its required local completion tool."""
+@dataclass
+class StageRunState:
+    """Mutable state isolated to one stage-run invocation."""
 
-    stage_catalog = tool_catalog.with_completion_tool(completion_tool)
-    action_log: list[str] = []
-    current_state = initial_state
+    current_state: PageState
     preceding_state: PageState | None = None
-    browser_action_count = 0
+    action_log: list[str] = field(default_factory=list)
+    browser_action_count: int = 0
 
-    for turn_index in range(agent_settings.max_model_turns):
-        messages = build_stage_messages(
-            completion_tool.stage_name,
-            task,
-            action_log,
-            current_state,
-            checkpoint,
-            strategy,
-            preceding_state,
-        )
-        try:
-            async with asyncio.timeout(agent_settings.model_request_timeout_seconds):
-                if reasoning_progress is None:
-                    model_turn = await stream_model_turn(llm_settings, stage_catalog, messages)
-                else:
+
+@dataclass(frozen=True)
+class StageRunner:
+    """Execute independent stages using stable dependencies from one browser session."""
+
+    llm_settings: LlmSettings
+    agent_settings: AgentSettings
+    tool_catalog: ToolCatalog
+    execute_browser_action: BrowserAction
+    reasoning_progress: ReasoningProgressReporter
+
+    async def run(
+        self,
+        stage: Stage,
+        task: str,
+        initial_state: PageState,
+    ) -> StageRunResult:
+        """Run fresh model turns until one stage submits its required local completion tool."""
+
+        completion_tool = stage.completion_tool
+        stage_catalog = self.tool_catalog.with_completion_tool(completion_tool)
+        state = StageRunState(current_state=initial_state)
+
+        for turn_index in range(self.agent_settings.max_model_turns):
+            messages = stage.build_messages(
+                task,
+                state.action_log,
+                state.current_state,
+                state.preceding_state,
+            )
+            try:
+                async with asyncio.timeout(self.agent_settings.model_request_timeout_seconds):
                     model_turn = await stream_model_turn(
-                        llm_settings,
+                        self.llm_settings,
                         stage_catalog,
                         messages,
-                        reasoning_progress.accept,
+                        self.reasoning_progress.accept,
                     )
-        except TimeoutError as error:
-            raise ExecutionLimitError("Model request time limit exceeded.") from error
-        if reasoning_progress is not None:
-            await reasoning_progress.flush_if_needed()
-        if model_turn.tool_call is None:
-            raise MissingStageCompletionError(
-                f"The {completion_tool.stage_name} stage stopped without its required "
-                "completion tool."
+            except TimeoutError as error:
+                raise ExecutionLimitError("Model request time limit exceeded.") from error
+            await self.reasoning_progress.flush_if_needed()
+            if model_turn.tool_call is None:
+                raise MissingStageCompletionError(
+                    f"The {stage.stage_name} stage stopped without its required "
+                    "completion tool."
+                )
+            if model_turn.tool_call.kind == "completion":
+                report = completion_tool.parse(model_turn.tool_call.arguments)
+                return StageRunResult(report, state.current_state)
+            if model_turn.tool_call.kind != "remote":
+                raise ModelStreamError("Model requested an unsupported tool-call route.")
+            if turn_index == self.agent_settings.max_model_turns - 1:
+                raise ExecutionLimitError(
+                    "A browser action was requested on the final model turn, leaving no turn for "
+                    "mandatory stage completion."
+                )
+            if state.browser_action_count >= self.agent_settings.max_browser_actions:
+                raise ExecutionLimitError("Browser action limit exceeded.")
+            remote_name = self.tool_catalog.remote_name_by_model_name[
+                model_turn.tool_call.model_tool_name
+            ]
+            state.preceding_state = state.current_state
+            state.current_state = await self.execute_browser_action(
+                remote_name, model_turn.tool_call.arguments
             )
-        if model_turn.tool_call.kind == "completion":
-            report = completion_tool.parse(model_turn.tool_call.arguments)
-            return StageRunResult(report, current_state)
-        if model_turn.tool_call.kind != "remote":
-            raise ModelStreamError("Model requested an unsupported tool-call route.")
-        if turn_index == agent_settings.max_model_turns - 1:
-            raise ExecutionLimitError(
-                "A browser action was requested on the final model turn, leaving no turn for "
-                "mandatory stage completion."
+            state.action_log.append(
+                format_browser_action(
+                    remote_name, model_turn.tool_call.arguments, state.current_state
+                )
             )
-        if browser_action_count >= agent_settings.max_browser_actions:
-            raise ExecutionLimitError("Browser action limit exceeded.")
-        remote_name = tool_catalog.remote_name_by_model_name[model_turn.tool_call.model_tool_name]
-        preceding_state = current_state
-        current_state = await execute_browser_action(remote_name, model_turn.tool_call.arguments)
-        action_log.append(
-            format_browser_action(remote_name, model_turn.tool_call.arguments, current_state)
-        )
-        browser_action_count += 1
+            state.browser_action_count += 1
 
-    raise ExecutionLimitError("Model-turn limit exceeded.")
+        raise ExecutionLimitError("Model-turn limit exceeded.")

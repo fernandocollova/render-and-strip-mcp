@@ -2,41 +2,25 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from typing import cast
 
-from .agent_context import PageState
-from .agent_loop import run_stage
-from .config import AgentSettings, LlmSettings
+from .agent_context import CollectionStage, PageState
+from .agent_loop import StageRunner
 from .errors import UnsuccessfulStageOutcomeError
-from .playwright_tools import ToolCatalog
-from .reasoning_progress import ReasoningProgressReporter
-from .stage_models import COLLECTION_COMPLETION_TOOL, CollectionReport
-
-BrowserAction = Callable[[str, dict[str, object]], Awaitable[PageState]]
+from .stage_models import CollectionReport
 
 
 async def collect_retained_final_document(
-    llm_settings: LlmSettings,
-    agent_settings: AgentSettings,
-    tool_catalog: ToolCatalog,
+    stage_runner: StageRunner,
     task: str,
     initial_state: PageState,
-    execute_browser_action: BrowserAction,
-    reasoning_progress: ReasoningProgressReporter | None = None,
 ) -> PageState:
     """Exhaust retainable page/view content and reject incomplete collection evidence."""
 
-    result = await run_stage(
-        llm_settings,
-        agent_settings,
-        tool_catalog,
-        COLLECTION_COMPLETION_TOOL,
+    result = await stage_runner.run(
+        CollectionStage("retained-final-document"),
         task,
         initial_state,
-        execute_browser_action,
-        reasoning_progress,
-        strategy="retained-final-document",
     )
     report = cast(CollectionReport, result.report)
     if not report.complete:

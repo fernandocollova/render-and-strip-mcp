@@ -11,7 +11,8 @@ from fastmcp.exceptions import ToolError
 from openai import APIConnectionError
 
 import render_and_strip_mcp.browser_agent as browser_agent_module
-from render_and_strip_mcp.agent_loop import StageRunResult
+from render_and_strip_mcp.agent_context import Stage
+from render_and_strip_mcp.agent_loop import StageRunner, StageRunResult
 from render_and_strip_mcp.errors import BrowserAgentError
 
 from .test_browser_agent import (
@@ -49,10 +50,16 @@ def test_dependency_errors_are_translated_and_cleaned_up(
     client = FakeBrowserClient(["https://example.test/start"] * 2)
     install_fake_session(monkeypatch, client)
 
-    async def fail_stage(*arguments: object, **keyword_arguments: object) -> StageRunResult:
+    async def fail_stage(
+        self: StageRunner,
+        stage: Stage,
+        task: str,
+        initial_state: object,
+    ) -> StageRunResult:
+        del self, stage, task, initial_state
         raise dependency_error
 
-    monkeypatch.setattr(browser_agent_module, "run_stage", fail_stage)
+    monkeypatch.setattr(browser_agent_module.StageRunner, "run", fail_stage)
 
     with pytest.raises(BrowserAgentError, match=expected_message):
         asyncio.run(
@@ -73,12 +80,18 @@ def test_cancellation_shields_browser_cleanup(monkeypatch: pytest.MonkeyPatch) -
     entered_stage = asyncio.Event()
     unblock_stage = asyncio.Event()
 
-    async def blocked_stage(*arguments: object, **keyword_arguments: object) -> StageRunResult:
+    async def blocked_stage(
+        self: StageRunner,
+        stage: Stage,
+        task: str,
+        initial_state: object,
+    ) -> StageRunResult:
+        del self, stage, task, initial_state
         entered_stage.set()
         await unblock_stage.wait()
         raise AssertionError("The stage should have been cancelled.")
 
-    monkeypatch.setattr(browser_agent_module, "run_stage", blocked_stage)
+    monkeypatch.setattr(browser_agent_module.StageRunner, "run", blocked_stage)
 
     async def exercise() -> None:
         invocation = asyncio.create_task(

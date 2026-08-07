@@ -14,17 +14,43 @@ DiscoveryStrategy: TypeAlias = Literal["retained-final-document", "unknown"]
 
 
 class StageReport(BaseModel):
-    """Base model that rejects untyped or extraneous stage-completion data."""
+    """Typed report the model returns through a local stage-completion tool.
+
+    Subclasses define request-local handoffs between stages. Reports reject unknown fields and
+    coercion so a model response cannot silently change the expected contract.
+    """
 
     model_config = {"extra": "forbid", "strict": True}
 
 
 class AccessCheckpoint(StageReport):
-    """Semantic state that reconstruction must restore after the discovery reset."""
+    """Handoff from access to reconstruction after discovery resets the page.
 
-    target_state: str = Field(min_length=1)
-    reconstruction_instructions: list[str] = Field(default_factory=list)
-    verification: list[str] = Field(min_length=1)
+    It records the semantic page state to restore, not a browser-action replay log or extracted
+    result data.
+    """
+
+    target_state: str = Field(
+        min_length=1,
+        description=(
+            "Describe the user-visible page or view state to restore after reset, including "
+            "relevant filters or selections. Do not include element references, selectors, "
+            "action history, or extracted facts."
+        ),
+    )
+    reconstruction_instructions: list[str] = Field(
+        default_factory=list,
+        description=(
+            "List semantic instructions for restoring the target state after reset. Rediscover "
+            "current controls; do not replay stale element references or selectors."
+        ),
+    )
+    verification: list[str] = Field(
+        min_length=1,
+        description=(
+            "List observable conditions that confirm the target state is restored after reset."
+        ),
+    )
 
     @field_validator("target_state")
     @classmethod
@@ -46,10 +72,21 @@ class AccessCheckpoint(StageReport):
 
 
 class DiscoveryReport(StageReport):
-    """Validated strategy-selection evidence from the discovery stage."""
+    """Handoff from discovery that selects or rejects a collection strategy.
 
-    strategy: DiscoveryStrategy
-    evidence: list[str] = Field(min_length=1)
+    Its evidence explains whether target content can safely remain in the final visible document.
+    """
+
+    strategy: DiscoveryStrategy = Field(
+        description=(
+            "Choose retained-final-document only when relevant revealed content can coexist in "
+            "the final visible document; otherwise choose unknown."
+        )
+    )
+    evidence: list[str] = Field(
+        min_length=1,
+        description="List observations or probe results that justify the selected strategy.",
+    )
 
     @field_validator("evidence")
     @classmethod
@@ -62,10 +99,17 @@ class DiscoveryReport(StageReport):
 
 
 class ReconstructionReport(StageReport):
-    """Validated reconstruction verification result."""
+    """Outcome of attempting to restore an access checkpoint after reset."""
 
-    verified: bool
-    evidence: list[str] = Field(min_length=1)
+    verified: bool = Field(
+        description=(
+            "State whether every checkpoint verification condition was observed after reset."
+        )
+    )
+    evidence: list[str] = Field(
+        min_length=1,
+        description="List observations supporting the reconstruction verification result.",
+    )
 
     @field_validator("evidence")
     @classmethod
@@ -78,10 +122,18 @@ class ReconstructionReport(StageReport):
 
 
 class CollectionReport(StageReport):
-    """Validated retained-document collection completion result."""
+    """Outcome of exhausting the selected retained-document collection strategy. """
 
-    complete: bool
-    evidence: list[str] = Field(min_length=1)
+    complete: bool = Field(
+        description=(
+            "State whether all relevant non-destructive retained-document reveal mechanisms were "
+            "exhausted and prior target content remained visible."
+        )
+    )
+    evidence: list[str] = Field(
+        min_length=1,
+        description="List observations supporting the collection-completeness result.",
+    )
 
     @field_validator("evidence")
     @classmethod
@@ -100,42 +152,54 @@ StageReportValue: TypeAlias = (
 
 @dataclass(frozen=True)
 class CompletionTool:
-    """One stage's local function schema and strict report parser."""
+    """One stage's local function schema and strict report parser.
 
-    stage_name: StageName
+    The model calls this tool when it reaches what it needs to in the browser.
+    """
+
     name: str
     report_type: type[StageReport]
 
     @property
     def openai_schema(self) -> dict[str, object]:
-        """Return the local completion function in OpenAI callable-tool format."""
+        """Return the model-visible function schema for submitting this report."""
 
         return {
             "type": "function",
             "function": {
                 "name": self.name,
-                "description": f"Complete the {self.stage_name} stage with its validated report.",
+                "description": "Complete this stage with its validated report.",
                 "parameters": self.report_type.model_json_schema(),
             },
         }
 
     def parse(self, arguments: dict[str, object]) -> StageReportValue:
-        """Validate serialized local completion arguments at the model boundary."""
+        """Validate model-returned arguments as this completion tool's report type."""
 
         try:
             return self.report_type.model_validate(arguments)
         except ValidationError as error:
             raise MalformedStageCompletionError(
-                f"The {self.stage_name} completion report is malformed."
+                f"Completion tool {self.name!r} supplied a malformed report."
             ) from error
 
 
-ACCESS_COMPLETION_TOOL = CompletionTool("access", "complete_access", AccessCheckpoint)
-DISCOVERY_COMPLETION_TOOL = CompletionTool("discovery", "complete_discovery", DiscoveryReport)
-RECONSTRUCTION_COMPLETION_TOOL = CompletionTool(
-    "reconstruction", "complete_reconstruction", ReconstructionReport
+ACCESS_COMPLETION_TOOL = CompletionTool(
+    "complete_access",
+    AccessCheckpoint,
 )
-COLLECTION_COMPLETION_TOOL = CompletionTool("collection", "complete_collection", CollectionReport)
+DISCOVERY_COMPLETION_TOOL = CompletionTool(
+    "complete_discovery",
+    DiscoveryReport,
+)
+RECONSTRUCTION_COMPLETION_TOOL = CompletionTool(
+    "complete_reconstruction",
+    ReconstructionReport,
+)
+COLLECTION_COMPLETION_TOOL = CompletionTool(
+    "complete_collection",
+    CollectionReport,
+)
 
 
 def _require_semantic_text(value: str, field_name: str) -> None:

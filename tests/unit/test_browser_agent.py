@@ -11,8 +11,8 @@ from fastmcp.client.client import CallToolResult
 from mcp.types import TextContent
 
 import render_and_strip_mcp.browser_agent as browser_agent_module
-from render_and_strip_mcp.agent_context import PageState
-from render_and_strip_mcp.agent_loop import StageRunResult
+from render_and_strip_mcp.agent_context import PageState, ReconstructionStage, Stage
+from render_and_strip_mcp.agent_loop import StageRunner, StageRunResult
 from render_and_strip_mcp.config import Settings
 from render_and_strip_mcp.errors import BrowserAgentError
 from render_and_strip_mcp.playwright_tools import PlaywrightSession, ToolCatalog
@@ -133,18 +133,19 @@ def install_successful_pipeline(
 
     pipeline_events: list[str] = []
 
-    async def fake_run_stage(*arguments: object, **keyword_arguments: object) -> StageRunResult:
-        completion_tool = arguments[3]
-        initial_state = arguments[5]
-        execute_action = arguments[6]
-        assert isinstance(initial_state, PageState)
-        assert callable(execute_action)
-        stage_name = completion_tool.stage_name  # type: ignore[union-attr]
+    async def fake_run_stage(
+        self: StageRunner,
+        stage: Stage,
+        task: str,
+        initial_state: PageState,
+    ) -> StageRunResult:
+        del task
+        stage_name = stage.stage_name
         pipeline_events.append(stage_name)
         if stage_name == "access":
             page_state = initial_state
             if invoke_access_action:
-                page_state = await execute_action("browser_click", {})
+                page_state = await self.execute_browser_action("browser_click", {})
                 assert page_state.observation == "### Page\n- Fresh snapshot"
             return StageRunResult(
                 AccessCheckpoint(
@@ -162,21 +163,21 @@ def install_successful_pipeline(
                 initial_state,
             )
         if stage_name == "reconstruction":
-            checkpoint = arguments[8]
-            assert isinstance(checkpoint, AccessCheckpoint)
-            assert checkpoint.reconstruction_instructions == []
+            assert isinstance(stage, ReconstructionStage)
+            assert stage.checkpoint.reconstruction_instructions == []
             return StageRunResult(
                 ReconstructionReport(verified=True, evidence=["Report is visible."]), initial_state
             )
         raise AssertionError(f"Unexpected stage {stage_name}")
 
-    async def fake_collection(*arguments: object, **keyword_arguments: object) -> PageState:
+    async def fake_collection(
+        stage_runner: StageRunner, task: str, initial_state: PageState
+    ) -> PageState:
+        del stage_runner, task
         pipeline_events.append("collection")
-        page_state = arguments[4]
-        assert isinstance(page_state, PageState)
-        return page_state
+        return initial_state
 
-    monkeypatch.setattr(browser_agent_module, "run_stage", fake_run_stage)
+    monkeypatch.setattr(browser_agent_module.StageRunner, "run", fake_run_stage)
     monkeypatch.setitem(
         browser_agent_module.COLLECTION_STRATEGIES,
         "retained-final-document",
@@ -342,13 +343,17 @@ def test_unknown_discovery_fails_before_reset_collection_or_extraction(
         ]
     )
 
-    async def unknown_discovery(*arguments: object, **keyword_arguments: object) -> StageRunResult:
+    async def unknown_discovery(
+        self: StageRunner,
+        stage: Stage,
+        task: str,
+        initial_state: PageState,
+    ) -> StageRunResult:
+        del self, stage, task
         report = next(reports)
-        initial_state = arguments[5]
-        assert isinstance(initial_state, PageState)
         return StageRunResult(report, initial_state)
 
-    monkeypatch.setattr(browser_agent_module, "run_stage", unknown_discovery)
+    monkeypatch.setattr(browser_agent_module.StageRunner, "run", unknown_discovery)
 
     with pytest.raises(BrowserAgentError, match="could not establish"):
         asyncio.run(
@@ -385,14 +390,16 @@ def test_failed_reconstruction_fails_before_collection_or_extraction(
     )
 
     async def failed_reconstruction(
-        *arguments: object, **keyword_arguments: object
+        self: StageRunner,
+        stage: Stage,
+        task: str,
+        initial_state: PageState,
     ) -> StageRunResult:
+        del self, stage, task
         report = next(reports)
-        initial_state = arguments[5]
-        assert isinstance(initial_state, PageState)
         return StageRunResult(report, initial_state)
 
-    monkeypatch.setattr(browser_agent_module, "run_stage", failed_reconstruction)
+    monkeypatch.setattr(browser_agent_module.StageRunner, "run", failed_reconstruction)
 
     with pytest.raises(BrowserAgentError, match="did not verify"):
         asyncio.run(
@@ -437,10 +444,16 @@ def test_cleanup_preserves_primary_failure(
     client = FakeBrowserClient(["https://example.test/start"] * 2, cleanup_error=True)
     install_fake_session(monkeypatch, client)
 
-    async def fail_stage(*arguments: object, **keyword_arguments: object) -> StageRunResult:
+    async def fail_stage(
+        self: StageRunner,
+        stage: Stage,
+        task: str,
+        initial_state: PageState,
+    ) -> StageRunResult:
+        del self, stage, task, initial_state
         raise BrowserAgentError("primary failure")
 
-    monkeypatch.setattr(browser_agent_module, "run_stage", fail_stage)
+    monkeypatch.setattr(browser_agent_module.StageRunner, "run", fail_stage)
 
     with pytest.raises(BrowserAgentError, match="primary failure"):
         asyncio.run(

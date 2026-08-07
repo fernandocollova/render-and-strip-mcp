@@ -8,8 +8,12 @@ from pydantic import ValidationError
 from render_and_strip_mcp.errors import MalformedStageCompletionError
 from render_and_strip_mcp.stage_models import (
     ACCESS_COMPLETION_TOOL,
+    COLLECTION_COMPLETION_TOOL,
+    DISCOVERY_COMPLETION_TOOL,
+    RECONSTRUCTION_COMPLETION_TOOL,
     AccessCheckpoint,
     CollectionReport,
+    CompletionTool,
     DiscoveryReport,
     ReconstructionReport,
 )
@@ -60,7 +64,33 @@ def test_stage_reports_reject_invalid_or_empty_semantic_data(
 def test_completion_tool_translates_validation_failures_to_domain_error() -> None:
     """Model-supplied local tool arguments do not leak validation implementation details."""
 
-    with pytest.raises(MalformedStageCompletionError, match="access completion"):
+    with pytest.raises(MalformedStageCompletionError, match=r"complete_access.*malformed"):
         ACCESS_COMPLETION_TOOL.parse({"target_state": "Ready", "verification": []})
 
     assert ACCESS_COMPLETION_TOOL.openai_schema["function"]["name"] == "complete_access"  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    "completion_tool",
+    [
+        ACCESS_COMPLETION_TOOL,
+        DISCOVERY_COMPLETION_TOOL,
+        RECONSTRUCTION_COMPLETION_TOOL,
+        COLLECTION_COMPLETION_TOOL,
+    ],
+)
+def test_completion_tool_schemas_describe_every_report_field(
+    completion_tool: CompletionTool,
+) -> None:
+    """Model-visible completion schemas explain every field they require or accept."""
+
+    function = completion_tool.openai_schema["function"]
+    assert isinstance(function, dict)
+    parameters = function["parameters"]
+    assert isinstance(parameters, dict)
+    properties = parameters["properties"]
+    assert isinstance(properties, dict)
+    for property_schema in properties.values():
+        assert isinstance(property_schema, dict)
+        description = property_schema.get("description")
+        assert isinstance(description, str) and description.strip()

@@ -39,7 +39,7 @@ async def stream_model_turn(
     llm_settings: LlmSettings,
     tool_catalog: ToolCatalog,
     messages: list[dict[str, str]],
-    on_reasoning_fragment: ReasoningHandler | None = None,
+    on_reasoning_fragment: ReasoningHandler,
 ) -> ModelTurn:
     """Run one constrained OpenAI-compatible streamed function-tool request."""
 
@@ -180,7 +180,7 @@ async def _accumulate_text_parts(
     delta: object,
     content_parts: list[str],
     reasoning_fragments: list[str],
-    on_reasoning_fragment: ReasoningHandler | None,
+    on_reasoning_fragment: ReasoningHandler,
 ) -> None:
     """Collect ordinary content and optional reasoning independently of tool calls."""
 
@@ -194,8 +194,7 @@ async def _accumulate_text_parts(
         if not isinstance(reasoning_content, str):
             raise ModelStreamError("Model stream reasoning_content must be text.")
         reasoning_fragments.append(reasoning_content)
-        if on_reasoning_fragment is not None:
-            await on_reasoning_fragment(reasoning_content)
+        await on_reasoning_fragment(reasoning_content)
 
 
 def _accumulate_tool_call_fragments(delta: object, tool_call_state: _ToolCallState) -> None:

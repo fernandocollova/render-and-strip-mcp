@@ -11,8 +11,8 @@ from fastmcp import Client
 from fastmcp.exceptions import ToolError
 from openai import OpenAIError
 
-from .agent_context import PageState
-from .agent_loop import run_stage
+from .agent_context import AccessStage, DiscoveryStage, PageState, ReconstructionStage
+from .agent_loop import StageRunner
 from .browser_tabs import current_tab_index, list_browser_tabs, select_original_tab
 from .collection_strategy import COLLECTION_STRATEGIES
 from .config import Settings
@@ -28,9 +28,6 @@ from .playwright_tools import PlaywrightSession, open_playwright_session
 from .reasoning_progress import ReasoningProgressReporter
 from .rendered_document import fetch_visible_top_level_document
 from .stage_models import (
-    ACCESS_COMPLETION_TOOL,
-    DISCOVERY_COMPLETION_TOOL,
-    RECONSTRUCTION_COMPLETION_TOOL,
     AccessCheckpoint,
     DiscoveryReport,
     ReconstructionReport,
@@ -138,29 +135,27 @@ class BrowserAgent:
                 initial_origin,
             )
 
-        await self._report_operational_status("Access")
-        access_result = await run_stage(
+        stage_runner = StageRunner(
             self._settings.llm,
             self._settings.agent,
             session.tool_catalog,
-            ACCESS_COMPLETION_TOOL,
-            task,
-            initial_state,
             execute_browser_action,
             self._reasoning_progress,
+        )
+
+        await self._report_operational_status("Access")
+        access_result = await stage_runner.run(
+            AccessStage(),
+            task,
+            initial_state,
         )
         checkpoint = cast(AccessCheckpoint, access_result.report)
 
         await self._report_operational_status("Discovery")
-        discovery_result = await run_stage(
-            self._settings.llm,
-            self._settings.agent,
-            session.tool_catalog,
-            DISCOVERY_COMPLETION_TOOL,
+        discovery_result = await stage_runner.run(
+            DiscoveryStage(),
             task,
             access_result.page_state,
-            execute_browser_action,
-            self._reasoning_progress,
         )
         discovery_report = cast(DiscoveryReport, discovery_result.report)
         if discovery_report.strategy == "unknown":
@@ -183,16 +178,10 @@ class BrowserAgent:
         )
 
         await self._report_operational_status("Reconstruction")
-        reconstruction_result = await run_stage(
-            self._settings.llm,
-            self._settings.agent,
-            session.tool_catalog,
-            RECONSTRUCTION_COMPLETION_TOOL,
+        reconstruction_result = await stage_runner.run(
+            ReconstructionStage(checkpoint),
             task,
             reset_state,
-            execute_browser_action,
-            self._reasoning_progress,
-            checkpoint,
         )
         reconstruction_report = cast(ReconstructionReport, reconstruction_result.report)
         if not reconstruction_report.verified:
@@ -203,13 +192,9 @@ class BrowserAgent:
         await self._report_operational_status("Collection")
         collection_handler = COLLECTION_STRATEGIES[discovery_report.strategy]
         await collection_handler(
-            self._settings.llm,
-            self._settings.agent,
-            session.tool_catalog,
+            stage_runner,
             task,
             reconstruction_result.page_state,
-            execute_browser_action,
-            self._reasoning_progress,
         )
 
         await self._report_operational_status("Final extraction and cleaning")

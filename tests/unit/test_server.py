@@ -12,6 +12,7 @@ import render_and_strip_mcp.server as server_module
 from render_and_strip_mcp.config import Settings
 from render_and_strip_mcp.errors import BrowserAgentError
 from render_and_strip_mcp.mcp_results import extract_text_result
+from render_and_strip_mcp.reasoning_progress import ReasoningProgressReporter
 
 
 def settings() -> Settings:
@@ -58,6 +59,7 @@ def test_registered_tool_returns_only_agent_html(monkeypatch: pytest.MonkeyPatch
 
     assert tool_names == ["render_and_strip_page"]
     assert observed["input"] == ("https://example.test/", "Read the page")
+    assert isinstance(observed["arguments"][1], ReasoningProgressReporter)  # type: ignore[index]
     assert html == "<!doctype html>\n<html><head></head><body><p>Clean</p></body></html>"
 
 

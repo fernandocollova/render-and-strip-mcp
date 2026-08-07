@@ -7,7 +7,13 @@ import asyncio
 import pytest
 
 import render_and_strip_mcp.agent_loop as agent_loop
-from render_and_strip_mcp.agent_context import PageState, build_stage_messages
+from render_and_strip_mcp.agent_context import (
+    AccessStage,
+    CollectionStage,
+    DiscoveryStage,
+    PageState,
+    ReconstructionStage,
+)
 from render_and_strip_mcp.config import AgentSettings, LlmSettings
 from render_and_strip_mcp.errors import ExecutionLimitError, MissingStageCompletionError
 from render_and_strip_mcp.model_stream import ModelTurn, RequestedToolCall
@@ -35,6 +41,22 @@ def catalog() -> ToolCatalog:
     """Build a one-action model-tool mapping."""
 
     return ToolCatalog([], {"browser_type": "browser_type"})
+
+
+def stage_runner(
+    execute_browser_action: agent_loop.BrowserAction,
+    reasoning_progress: RecordingProgressReporter,
+    agent_settings: AgentSettings | None = None,
+) -> agent_loop.StageRunner:
+    """Build one reusable runner with stable test dependencies."""
+
+    return agent_loop.StageRunner(
+        llm_settings(),
+        AgentSettings() if agent_settings is None else agent_settings,
+        catalog(),
+        execute_browser_action,
+        reasoning_progress,  # type: ignore[arg-type]
+    )
 
 
 def access_completion_turn() -> ModelTurn:
@@ -101,14 +123,10 @@ def test_stage_runner_uses_fresh_compact_context_and_local_completion(
     monkeypatch.setattr(agent_loop, "stream_model_turn", fake_stream_model_turn)
 
     result = asyncio.run(
-        agent_loop.run_stage(
-            llm_settings(),
-            AgentSettings(),
-            catalog(),
-            ACCESS_COMPLETION_TOOL,
+        stage_runner(execute_browser_action, RecordingProgressReporter()).run(
+            AccessStage(),
             "Complete the task",
             PageState("initial snapshot", "https://example.test/"),
-            execute_browser_action,
         )
     )
 
@@ -143,15 +161,10 @@ def test_stage_runner_uses_public_interval_respecting_progress_flush(
     monkeypatch.setattr(agent_loop, "stream_model_turn", fake_stream_model_turn)
 
     asyncio.run(
-        agent_loop.run_stage(
-            llm_settings(),
-            AgentSettings(),
-            catalog(),
-            ACCESS_COMPLETION_TOOL,
+        stage_runner(unused_action, reporter).run(
+            AccessStage(),
             "task",
             PageState("snapshot", "https://example.test/"),
-            unused_action,
-            reporter,  # type: ignore[arg-type]
         )
     )
 
@@ -170,17 +183,13 @@ def test_stage_context_exposes_only_permitted_prior_stage_inputs() -> None:
     current_state = PageState("current", "https://example.test/report")
     preceding_state = PageState("before probe", "https://example.test/report")
 
-    access = build_stage_messages("access", "task", [], current_state)
-    discovery = build_stage_messages("discovery", "task", [], current_state)
-    reconstruction = build_stage_messages(
-        "reconstruction", "task", [], current_state, checkpoint=checkpoint
-    )
-    collection = build_stage_messages(
-        "collection",
+    access = AccessStage().build_messages("task", [], current_state)
+    discovery = DiscoveryStage().build_messages("task", [], current_state)
+    reconstruction = ReconstructionStage(checkpoint).build_messages("task", [], current_state)
+    collection = CollectionStage("retained-final-document").build_messages(
         "task",
         [],
         current_state,
-        strategy="retained-final-document",
         preceding_state=preceding_state,
     )
 
@@ -199,20 +208,20 @@ def test_stage_prompts_define_page_retrieval_waiting_and_completion_contracts() 
 
     state = PageState("snapshot", "https://example.test/")
     messages_by_stage = {
-        "access": build_stage_messages("access", "task", [], state),
-        "discovery": build_stage_messages("discovery", "task", [], state),
-        "reconstruction": build_stage_messages(
-            "reconstruction",
+        "access": AccessStage().build_messages("task", [], state),
+        "discovery": DiscoveryStage().build_messages("task", [], state),
+        "reconstruction": ReconstructionStage(
+            AccessCheckpoint(
+                target_state="View",
+                verification=["Visible."],
+            )
+        ).build_messages(
             "task",
             [],
             state,
-            checkpoint=AccessCheckpoint(
-                target_state="View",
-                verification=["Visible."],
-            ),
         ),
-        "collection": build_stage_messages(
-            "collection", "task", [], state, strategy="retained-final-document"
+        "collection": CollectionStage("retained-final-document").build_messages(
+            "task", [], state
         ),
     }
 
@@ -239,14 +248,10 @@ def test_stage_runner_rejects_ordinary_terminal_response(
 
     with pytest.raises(MissingStageCompletionError, match="access stage"):
         asyncio.run(
-            agent_loop.run_stage(
-                llm_settings(),
-                AgentSettings(),
-                catalog(),
-                ACCESS_COMPLETION_TOOL,
+            stage_runner(unused_action, RecordingProgressReporter()).run(
+                AccessStage(),
                 "task",
                 PageState("snapshot", "https://example.test/"),
-                unused_action,
             )
         )
 
@@ -264,14 +269,14 @@ def test_stage_limits_allow_final_completion_and_reject_final_turn_action(
 
     monkeypatch.setattr(agent_loop, "stream_model_turn", complete_access)
     result = asyncio.run(
-        agent_loop.run_stage(
-            llm_settings(),
+        stage_runner(
+            unused_action,
+            RecordingProgressReporter(),
             AgentSettings(max_model_turns=1),
-            catalog(),
-            ACCESS_COMPLETION_TOOL,
+        ).run(
+            AccessStage(),
             "task",
             PageState("snapshot", "https://example.test/"),
-            unused_action,
         )
     )
     completion_call = access_completion_turn().tool_call
@@ -290,14 +295,14 @@ def test_stage_limits_allow_final_completion_and_reject_final_turn_action(
     monkeypatch.setattr(agent_loop, "stream_model_turn", request_remote_action)
     with pytest.raises(ExecutionLimitError, match="final model turn"):
         asyncio.run(
-            agent_loop.run_stage(
-                llm_settings(),
+            stage_runner(
+                unused_action,
+                RecordingProgressReporter(),
                 AgentSettings(max_model_turns=1),
-                catalog(),
-                ACCESS_COMPLETION_TOOL,
+            ).run(
+                AccessStage(),
                 "task",
                 PageState("snapshot", "https://example.test/"),
-                unused_action,
             )
         )
 
@@ -335,7 +340,10 @@ def test_stage_action_limits_are_independent_for_each_stage(
     )
     action_count = 0
 
+    observed_messages: list[str] = []
+
     async def fake_stream_model_turn(*arguments: object) -> ModelTurn:
+        observed_messages.append(arguments[2][1]["content"])  # type: ignore[index]
         return next(turns)
 
     async def execute_action(*arguments: object) -> PageState:
@@ -345,36 +353,39 @@ def test_stage_action_limits_are_independent_for_each_stage(
 
     monkeypatch.setattr(agent_loop, "stream_model_turn", fake_stream_model_turn)
     settings = AgentSettings(max_model_turns=2, max_browser_actions=1)
+    runner = stage_runner(execute_action, RecordingProgressReporter(), settings)
     first_result = asyncio.run(
-        agent_loop.run_stage(
-            llm_settings(),
-            settings,
-            catalog(),
-            ACCESS_COMPLETION_TOOL,
+        runner.run(
+            AccessStage(),
             "task",
             PageState("initial", "https://example.test/"),
-            execute_action,
         )
     )
     asyncio.run(
-        agent_loop.run_stage(
-            llm_settings(),
-            settings,
-            catalog(),
-            DISCOVERY_COMPLETION_TOOL,
+        runner.run(
+            DiscoveryStage(),
             "task",
             first_result.page_state,
-            execute_action,
         )
     )
 
     assert action_count == 2
+    assert "Actions:\n(no model-directed actions yet)" in observed_messages[2]
 
 
-def test_stage_context_requires_only_its_own_completion_inputs() -> None:
-    """The runner's completion schemas stay tied to their matching named stages."""
+def test_stage_classes_own_their_matching_completion_tools() -> None:
+    """Each concrete stage owns its identity and matching completion contract."""
 
-    assert ACCESS_COMPLETION_TOOL.stage_name == "access"
-    assert DISCOVERY_COMPLETION_TOOL.stage_name == "discovery"
-    assert RECONSTRUCTION_COMPLETION_TOOL.stage_name == "reconstruction"
-    assert COLLECTION_COMPLETION_TOOL.stage_name == "collection"
+    checkpoint = AccessCheckpoint(target_state="View", verification=["Visible."])
+
+    assert AccessStage().stage_name == "access"
+    assert DiscoveryStage().stage_name == "discovery"
+    assert ReconstructionStage(checkpoint).stage_name == "reconstruction"
+    assert CollectionStage("retained-final-document").stage_name == "collection"
+    assert AccessStage().completion_tool is ACCESS_COMPLETION_TOOL
+    assert DiscoveryStage().completion_tool is DISCOVERY_COMPLETION_TOOL
+    assert ReconstructionStage(checkpoint).completion_tool is RECONSTRUCTION_COMPLETION_TOOL
+    assert (
+        CollectionStage("retained-final-document").completion_tool is COLLECTION_COMPLETION_TOOL
+    )
+    assert not hasattr(ACCESS_COMPLETION_TOOL, "stage_name")

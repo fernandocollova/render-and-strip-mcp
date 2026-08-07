@@ -137,11 +137,12 @@ def install_categorizing_model(
         llm_settings: object,
         tool_catalog: ToolCatalog,
         messages: list[dict[str, str]],
-        on_reasoning_fragment: object = None,
+        on_reasoning_fragment: object,
     ) -> ModelTurn:
+        assert callable(on_reasoning_fragment)
         completion_tool = tool_catalog.completion_tool
         assert completion_tool is not None
-        stage_name = completion_tool.stage_name
+        stage_name = completion_tool.name.removeprefix("complete_")
         stage_turn_counts[stage_name] += 1
         user_message = messages[1]["content"]
 

@@ -40,6 +40,10 @@ async def chunks(items: list[dict[str, object]]) -> AsyncIterator[dict[str, obje
         yield item
 
 
+async def ignore_reasoning_fragment(reasoning_fragment: str) -> None:
+    """Provide the required reasoning sink when a test does not inspect fragments."""
+
+
 def test_stream_accumulates_fragmented_tool_call_and_fixed_parameters(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -83,18 +87,24 @@ def test_stream_accumulates_fragmented_tool_call_and_fixed_parameters(
         )
 
     monkeypatch.setattr(model_stream.litellm, "acompletion", fake_acompletion)
+    observed_reasoning: list[str] = []
+
+    async def record_reasoning_fragment(reasoning_fragment: str) -> None:
+        observed_reasoning.append(reasoning_fragment)
 
     result = asyncio.run(
         model_stream.stream_model_turn(
             llm_settings(),
             catalog(),
             [{"role": "system", "content": "system"}, {"role": "user", "content": "user"}],
+            record_reasoning_fragment,
         )
     )
 
     assert result.tool_call is not None
     assert result.tool_call.arguments == {}
     assert result.reasoning_fragments == ("think ", "now")
+    assert observed_reasoning == ["think ", "now"]
     assert {
         key: observed[key]
         for key in {
@@ -161,6 +171,7 @@ def test_stream_routes_local_completion_call_separately_from_remote_actions(
                 ACCESS_COMPLETION_TOOL
             ),
             [],
+            ignore_reasoning_fragment,
         )
     )
 
@@ -193,4 +204,8 @@ def test_stream_rejects_malformed_or_non_normal_completion(
     monkeypatch.setattr(model_stream.litellm, "acompletion", fake_acompletion)
 
     with pytest.raises(ModelStreamError, match=error_message):
-        asyncio.run(model_stream.stream_model_turn(llm_settings(), catalog(), []))
+        asyncio.run(
+            model_stream.stream_model_turn(
+                llm_settings(), catalog(), [], ignore_reasoning_fragment
+            )
+        )
