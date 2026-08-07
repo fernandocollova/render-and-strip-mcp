@@ -70,9 +70,8 @@ def test_positive_batch_limit_retains_later_fragments_in_order() -> None:
     asyncio.run(exercise())
 
     assert context.notifications == [
-        (1, "first"),
-        (2, "second\n[status] Access"),
-        (1, "fourth"),
+        (2, "first\nsecond"),
+        (2, "[status] Access\nfourth"),
     ]
 
 
@@ -93,11 +92,11 @@ def test_unlimited_batch_delivers_all_buffered_fragments_when_eligible() -> None
 
     asyncio.run(exercise())
 
-    assert context.notifications == [(1, "first"), (2, "second\nthird")]
+    assert context.notifications == [(3, "first\nsecond\nthird")]
 
 
-def test_flush_if_needed_does_not_bypass_a_positive_interval() -> None:
-    """Cleanup checks leave pending fragments buffered until the interval elapses."""
+def test_positive_interval_delays_the_initial_progress_delivery() -> None:
+    """The first batch remains buffered until the positive configured interval elapses."""
 
     clock = FakeClock()
     context = FakeProgressContext()
@@ -114,7 +113,7 @@ def test_flush_if_needed_does_not_bypass_a_positive_interval() -> None:
 
     asyncio.run(exercise())
 
-    assert context.notifications == [(1, "first"), (1, "second")]
+    assert context.notifications == [(2, "first\nsecond")]
 
 
 def test_delivery_failure_is_non_fatal_and_later_batches_remain_eligible(
