@@ -308,10 +308,6 @@ class BrowserAgent:
                 result = await client.call_tool(tool_name, arguments, timeout=timeout_seconds)
         except TimeoutError as error:
             raise ExecutionLimitError(f"Playwright {tool_name} time limit exceeded.") from error
-        if not hasattr(result, "content"):
-            raise BrowserAgentError(
-                "Playwright MCP returned an unsupported asynchronous task result."
-            )
         return result
 
     async def _report_operational_status(self, status: str) -> None:
@@ -337,6 +333,4 @@ class BrowserAgent:
         except asyncio.CancelledError:
             await asyncio.shield(close_task)
             raise
-        if not hasattr(close_result, "content"):
-            raise BrowserAgentError("Playwright MCP returned an unsupported cleanup result.")
         extract_text_result(close_result)

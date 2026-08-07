@@ -1,35 +1,33 @@
-"""Tests for the tested official Playwright MCP tool contract."""
+"""Tests for Playwright tool-catalog construction."""
 
 from __future__ import annotations
 
 import asyncio
-from copy import deepcopy
 
 import pytest
 from mcp.types import Tool
 
 import render_and_strip_mcp.playwright_tools as playwright_tools
 from render_and_strip_mcp.errors import (
-    BrowserCompatibilityError,
     StageToolCollisionError,
     ToolSchemaError,
-)
-from render_and_strip_mcp.playwright_contract import (
-    OFFICIAL_PLAYWRIGHT_MCP_HTTP_PATH,
-    OFFICIAL_PLAYWRIGHT_MCP_VERSION,
-    OFFICIAL_REQUIRED_TOOL_SCHEMAS,
 )
 from render_and_strip_mcp.stage_models import ACCESS_COMPLETION_TOOL
 
 
-def official_tools() -> list[Tool]:
-    """Return the minimum official tools plus representative eligible actions."""
+def discovered_tools() -> list[Tool]:
+    """Return built-in browser tools plus representative eligible actions."""
 
     return [
-        *[
-            Tool(name=name, description=f"Official {name}", inputSchema=deepcopy(schema))
-            for name, schema in OFFICIAL_REQUIRED_TOOL_SCHEMAS.items()
-        ],
+        Tool(name="browser_navigate", description="Navigate", inputSchema=object_schema("url")),
+        Tool(name="browser_tabs", description="Tabs", inputSchema=object_schema("action")),
+        Tool(name="browser_snapshot", description="Snapshot", inputSchema=object_schema()),
+        Tool(
+            name="browser_evaluate",
+            description="Evaluate",
+            inputSchema=object_schema("function"),
+        ),
+        Tool(name="browser_close", description="Close", inputSchema=object_schema()),
         Tool(name="browser_click", description="Click", inputSchema=object_schema("target")),
         Tool(
             name="browser_run_code_unsafe",
@@ -51,73 +49,10 @@ def object_schema(*property_names: str) -> dict[str, object]:
     }
 
 
-def test_required_capabilities_validate_documented_shapes() -> None:
-    """The official navigation, tabs, evaluation, and close tools are required."""
-
-    playwright_tools.validate_required_capabilities(official_tools())
-
-    incomplete_tools = [tool for tool in official_tools() if tool.name != "browser_close"]
-    with pytest.raises(BrowserCompatibilityError, match="browser_close"):
-        playwright_tools.validate_required_capabilities(incomplete_tools)
-
-    malformed_tools = official_tools()
-    malformed_tools[0] = Tool(
-        name="browser_navigate",
-        description="Navigate",
-        inputSchema=object_schema("target"),
-    )
-    with pytest.raises(BrowserCompatibilityError, match="incompatible input properties"):
-        playwright_tools.validate_required_capabilities(malformed_tools)
-
-
-def test_pinned_official_contract_records_endpoint_and_required_schemas() -> None:
-    """Compatibility metadata records the exact upstream interface this service supports."""
-
-    assert OFFICIAL_PLAYWRIGHT_MCP_VERSION == "0.0.78"
-    assert OFFICIAL_PLAYWRIGHT_MCP_HTTP_PATH == "/mcp"
-    assert OFFICIAL_REQUIRED_TOOL_SCHEMAS == {
-        "browser_navigate": {
-            "type": "object",
-            "properties": {"url": {"type": "string"}},
-            "required": ["url"],
-        },
-        "browser_tabs": {
-            "type": "object",
-            "properties": {
-                "action": {"type": "string", "enum": ["list", "new", "close", "select"]},
-                "index": {"type": "number"},
-                "url": {"type": "string"},
-            },
-            "required": ["action"],
-        },
-        "browser_snapshot": {
-            "type": "object",
-            "properties": {
-                "target": {"type": "string"},
-                "depth": {"type": "number"},
-                "boxes": {"type": "boolean"},
-                "filename": {"type": "string"},
-            },
-            "required": [],
-        },
-        "browser_evaluate": {
-            "type": "object",
-            "properties": {
-                "function": {"type": "string"},
-                "element": {"type": "string"},
-                "target": {"type": "string"},
-                "filename": {"type": "string"},
-            },
-            "required": ["function"],
-        },
-        "browser_close": {"type": "object", "properties": {}, "required": []},
-    }
-
-
 def test_catalog_excludes_reserved_and_unsafe_tools() -> None:
     """Only eligible browser actions are exposed as callable model tools."""
 
-    catalog = playwright_tools.build_tool_catalog(official_tools())
+    catalog = playwright_tools.build_tool_catalog(discovered_tools())
 
     assert catalog.remote_name_by_model_name == {
         "browser_click": "browser_click",
@@ -134,7 +69,7 @@ def test_catalog_excludes_reserved_and_unsafe_tools() -> None:
 def test_catalog_adds_local_completion_tool_without_exposing_or_rerouting_remote_tools() -> None:
     """Completion reports are handled locally while eligible browser tools remain remote."""
 
-    catalog = playwright_tools.build_tool_catalog(official_tools()).with_completion_tool(
+    catalog = playwright_tools.build_tool_catalog(discovered_tools()).with_completion_tool(
         ACCESS_COMPLETION_TOOL
     )
 
@@ -147,7 +82,7 @@ def test_catalog_rejects_local_completion_name_collision() -> None:
     """An official remote tool must not shadow the stage-local completion route."""
 
     tools = [
-        *official_tools(),
+        *discovered_tools(),
         Tool(name="complete_access", description="Conflicting tool", inputSchema=object_schema()),
     ]
     catalog = playwright_tools.build_tool_catalog(tools)
@@ -159,7 +94,7 @@ def test_catalog_rejects_local_completion_name_collision() -> None:
 def test_catalog_rejects_invalid_openai_tool_name() -> None:
     """An incompatible remote tool name fails instead of receiving a compatibility mapping."""
 
-    tools = [*official_tools(), Tool(name="browser action", inputSchema=object_schema())]
+    tools = [*discovered_tools(), Tool(name="browser action", inputSchema=object_schema())]
 
     with pytest.raises(ToolSchemaError, match="invalid OpenAI function name"):
         playwright_tools.build_tool_catalog(tools)
@@ -168,7 +103,7 @@ def test_catalog_rejects_invalid_openai_tool_name() -> None:
 def test_catalog_rejects_missing_tool_description() -> None:
     """Eligible tools must retain the official interface's non-empty description."""
 
-    tools = [*official_tools(), Tool(name="browser_custom", inputSchema=object_schema())]
+    tools = [*discovered_tools(), Tool(name="browser_custom", inputSchema=object_schema())]
 
     with pytest.raises(ToolSchemaError, match="must have a description"):
         playwright_tools.build_tool_catalog(tools)
@@ -178,7 +113,7 @@ def test_catalog_rejects_nonportable_schema_keywords() -> None:
     """Unsupported schema semantics fail rather than being silently omitted."""
 
     tools = [
-        *official_tools(),
+        *discovered_tools(),
         Tool(
             name="browser_custom",
             inputSchema={"type": "object", "properties": {}, "oneOf": []},
@@ -189,8 +124,10 @@ def test_catalog_rejects_nonportable_schema_keywords() -> None:
         playwright_tools.build_tool_catalog(tools)
 
 
-def test_open_session_discovers_and_validates_tools(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Each opener creates one async client session and exposes its catalog."""
+def test_open_session_uses_discovered_tools_without_capability_prevalidation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each opener creates one async client session and exposes its discovered catalog."""
 
     observed: list[object] = []
 
@@ -207,13 +144,15 @@ def test_open_session_discovers_and_validates_tools(monkeypatch: pytest.MonkeyPa
 
         async def list_tools(self) -> list[Tool]:
             observed.append("list")
-            return official_tools()
+            return [Tool(name="browser_click", description="Click", inputSchema=object_schema())]
 
     monkeypatch.setattr(playwright_tools, "Client", FakeClient)
 
     async def exercise() -> None:
         async with playwright_tools.open_playwright_session("http://browser.test/mcp") as session:
-            assert "browser_click" in session.tool_catalog.remote_name_by_model_name
+            assert session.tool_catalog.remote_name_by_model_name == {
+                "browser_click": "browser_click"
+            }
 
     asyncio.run(exercise())
 

@@ -7,7 +7,8 @@ import json
 from contextlib import asynccontextmanager
 
 import pytest
-from mcp.types import CallToolResult, TextContent
+from fastmcp.client.client import CallToolResult
+from mcp.types import TextContent
 
 import render_and_strip_mcp.browser_agent as browser_agent_module
 from render_and_strip_mcp.agent_context import PageState
@@ -41,7 +42,12 @@ def settings(**agent_values: object) -> Settings:
 def text_result(text: str, is_error: bool = False) -> CallToolResult:
     """Create a textual official-MCP result for fake remote calls."""
 
-    return CallToolResult(content=[TextContent(type="text", text=text)], isError=is_error)
+    return CallToolResult(
+        content=[TextContent(type="text", text=text)],
+        structured_content=None,
+        meta=None,
+        is_error=is_error,
+    )
 
 
 class FakeBrowserClient:

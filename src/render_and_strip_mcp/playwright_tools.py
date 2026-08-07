@@ -1,4 +1,4 @@
-"""Validation and OpenAI-schema translation for official Playwright MCP tools."""
+"""OpenAI-schema translation for discovered Playwright MCP tools."""
 
 from __future__ import annotations
 
@@ -11,8 +11,7 @@ from typing import Any
 from fastmcp import Client
 from mcp.types import Tool
 
-from .errors import BrowserCompatibilityError, StageToolCollisionError, ToolSchemaError
-from .playwright_contract import OFFICIAL_REQUIRED_TOOL_SCHEMAS
+from .errors import StageToolCollisionError, ToolSchemaError
 from .stage_models import CompletionTool
 
 RESERVED_TOOL_NAMES = frozenset({"browser_tabs", "browser_snapshot", "browser_close"})
@@ -63,7 +62,7 @@ class ToolCatalog:
 
 @dataclass(frozen=True)
 class PlaywrightSession:
-    """A validated client connection to one isolated Playwright MCP session."""
+    """A client connection and callable catalog for one Playwright MCP session."""
 
     client: Client
     tool_catalog: ToolCatalog
@@ -71,58 +70,11 @@ class PlaywrightSession:
 
 @asynccontextmanager
 async def open_playwright_session(endpoint: str) -> AsyncGenerator[PlaywrightSession]:
-    """Open one HTTP MCP client session and validate its official capabilities."""
+    """Open one HTTP MCP client session and discover its callable tools."""
 
     async with Client(endpoint) as client:
         discovered_tools = await client.list_tools()
-        validate_required_capabilities(discovered_tools)
         yield PlaywrightSession(client=client, tool_catalog=build_tool_catalog(discovered_tools))
-
-
-def validate_required_capabilities(tools: list[Tool]) -> None:
-    """Ensure the configured server exposes the tested official MCP interface."""
-
-    tools_by_name = {tool.name: tool for tool in tools}
-    missing_tools = sorted(set(OFFICIAL_REQUIRED_TOOL_SCHEMAS) - tools_by_name.keys())
-    if missing_tools:
-        raise BrowserCompatibilityError(
-            "Configured Playwright MCP server is missing required capabilities: "
-            + ", ".join(missing_tools)
-        )
-
-    for tool_name, expected_schema in OFFICIAL_REQUIRED_TOOL_SCHEMAS.items():
-        input_schema = tools_by_name[tool_name].inputSchema
-        if not isinstance(input_schema, dict):
-            raise BrowserCompatibilityError(
-                f"Playwright MCP capability {tool_name!r} has a non-object input schema."
-            )
-        properties = input_schema.get("properties")
-        expected_properties = expected_schema["properties"]
-        if input_schema.get("type") != expected_schema["type"] or not isinstance(properties, dict):
-            raise BrowserCompatibilityError(
-                f"Playwright MCP capability {tool_name!r} does not match its pinned object schema."
-            )
-        if set(properties) != set(expected_properties):
-            raise BrowserCompatibilityError(
-                f"Playwright MCP capability {tool_name!r} has incompatible input properties."
-            )
-        if input_schema.get("required", []) != expected_schema["required"]:
-            raise BrowserCompatibilityError(
-                f"Playwright MCP capability {tool_name!r} has incompatible required inputs."
-            )
-        for property_name, expected_property_schema in expected_properties.items():
-            property_schema = properties[property_name]
-            if not isinstance(property_schema, dict):
-                raise BrowserCompatibilityError(
-                    f"Playwright MCP capability {tool_name!r} has an invalid "
-                    f"{property_name!r} schema."
-                )
-            for schema_key, expected_value in expected_property_schema.items():
-                if property_schema.get(schema_key) != expected_value:
-                    raise BrowserCompatibilityError(
-                        f"Playwright MCP capability {tool_name!r} has incompatible "
-                        f"{property_name!r} {schema_key!r}."
-                    )
 
 
 def build_tool_catalog(tools: list[Tool]) -> ToolCatalog:

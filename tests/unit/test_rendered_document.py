@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from mcp.types import CallToolResult, TextContent
+from fastmcp.client.client import CallToolResult
+from mcp.types import TextContent
 
 from render_and_strip_mcp.errors import BrowserAgentError
 from render_and_strip_mcp.rendered_document import (
@@ -35,7 +36,12 @@ class FakeBrowserClient:
 def evaluation_result(text: str, is_error: bool = False) -> CallToolResult:
     """Return a textual official-MCP browser_evaluate response."""
 
-    return CallToolResult(content=[TextContent(type="text", text=text)], isError=is_error)
+    return CallToolResult(
+        content=[TextContent(type="text", text=text)],
+        structured_content=None,
+        meta=None,
+        is_error=is_error,
+    )
 
 
 def test_fetch_visible_document_uses_pinned_expression() -> None:

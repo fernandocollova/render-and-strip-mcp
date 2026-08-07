@@ -7,10 +7,6 @@ class BrowserAgentError(Exception):
     """A browser-agent request cannot produce a complete result."""
 
 
-class BrowserCompatibilityError(BrowserAgentError):
-    """The configured Playwright MCP server lacks a required capability."""
-
-
 class ToolSchemaError(BrowserAgentError):
     """A remote MCP tool cannot be represented as an OpenAI function tool."""
 

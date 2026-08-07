@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 
+from fastmcp.client.client import CallToolResult
 from mcp.types import TextContent
 
 from .errors import BrowserAgentError
@@ -12,12 +13,12 @@ from .errors import BrowserAgentError
 RESULT_SECTION = re.compile(r"^### Result\n(?P<result>.*?)(?=^### |\Z)", re.MULTILINE | re.DOTALL)
 
 
-def extract_text_result(result: object) -> str:
+def extract_text_result(result: CallToolResult) -> str:
     """Return the official server's textual response or fail on a remote error result."""
 
-    if _result_is_error(result):
+    if result.is_error:
         raise BrowserAgentError(_error_message(result))
-    content = getattr(result, "content", None)
+    content = result.content
     has_only_text_content = content and all(
         isinstance(content_item, TextContent) for content_item in content
     )
@@ -26,7 +27,7 @@ def extract_text_result(result: object) -> str:
     return "\n".join(content_item.text for content_item in content)
 
 
-def extract_json_string_result(result: object) -> str:
+def extract_json_string_result(result: CallToolResult) -> str:
     """Decode a string returned by browser_evaluate's documented Result section."""
 
     text_result = extract_text_result(result)
@@ -42,19 +43,14 @@ def extract_json_string_result(result: object) -> str:
     return decoded_value
 
 
-def _error_message(result: object) -> str:
-    """Return a useful remote error without assuming an optional content shape."""
+def _error_message(result: CallToolResult) -> str:
+    """Return a useful remote error from an error result."""
 
-    content = getattr(result, "content", [])
     text_content = [
-        content_item.text for content_item in content if isinstance(content_item, TextContent)
+        content_item.text
+        for content_item in result.content
+        if isinstance(content_item, TextContent)
     ]
     if text_content:
         return "\n".join(text_content)
     return "Playwright MCP reported a tool error."
-
-
-def _result_is_error(result: object) -> bool:
-    """Support the official MCP model and FastMCP client's snake-case result field."""
-
-    return bool(getattr(result, "is_error", getattr(result, "isError", False)))

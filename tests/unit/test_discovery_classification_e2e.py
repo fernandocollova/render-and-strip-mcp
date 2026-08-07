@@ -8,7 +8,8 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 
 import pytest
-from mcp.types import CallToolResult, TextContent
+from fastmcp.client.client import CallToolResult
+from mcp.types import TextContent
 
 import render_and_strip_mcp.agent_loop as agent_loop
 import render_and_strip_mcp.browser_agent as browser_agent_module
@@ -39,7 +40,11 @@ def settings() -> Settings:
 def text_result(text: str) -> CallToolResult:
     """Return a successful text response in the official MCP result shape."""
 
-    return CallToolResult(content=[TextContent(type="text", text=text)])
+    return CallToolResult(
+        content=[TextContent(type="text", text=text)],
+        structured_content=None,
+        meta=None,
+    )
 
 
 class CategorizationBrowserClient:

@@ -137,8 +137,8 @@ The focused command disables coverage because the 80% gate applies to the full s
 options default to Compose service DNS names and can be overridden with `--compose-app-endpoint`,
 `--compose-fixture-url`, `--compose-model-api-base`, and `--compose-playwright-endpoint`.
 
-It uses the explicit plain-HTTP integration configuration, validates the official Playwright MCP
-wire contract and rendered-document cleanup against `http://test-site:8081/`, checks the actual
+It uses the explicit plain-HTTP integration configuration, exercises the official Playwright MCP
+wire behavior and rendered-document cleanup against `http://test-site:8081/`, checks the actual
 model and application transports, and avoids nondeterministic local-model tool calls. A complete
 `render_and_strip_page` end-to-end call additionally requires a reliably tool-capable GGUF model,
 which is not part of the deterministic test suite.

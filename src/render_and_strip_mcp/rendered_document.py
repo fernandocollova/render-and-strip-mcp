@@ -51,8 +51,6 @@ async def fetch_visible_top_level_document(client: Client, timeout_seconds: floa
         {"function": VISIBLE_DOCUMENT_EXPRESSION},
         timeout=timeout_seconds,
     )
-    if not hasattr(result, "content"):
-        raise BrowserAgentError("Playwright MCP returned an unsupported document retrieval result.")
     document_html = extract_json_string_result(result)
     if not is_complete_html_document(document_html):
         raise BrowserAgentError("Playwright browser_evaluate returned malformed document HTML.")
