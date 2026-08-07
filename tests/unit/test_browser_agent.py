@@ -15,7 +15,6 @@ from render_and_strip_mcp.agent_loop import StageRunResult
 from render_and_strip_mcp.config import Settings
 from render_and_strip_mcp.errors import BrowserAgentError
 from render_and_strip_mcp.playwright_tools import PlaywrightSession, ToolCatalog
-from render_and_strip_mcp.reasoning_progress import ReasoningProgressReporter
 from render_and_strip_mcp.stage_models import (
     AccessCheckpoint,
     DiscoveryReport,
@@ -88,6 +87,20 @@ class FakeBrowserClient:
             return text_result("cleanup failed", is_error=self._cleanup_error)
         self._action_completed = True
         return text_result("### Page\n- Stale action result")
+
+
+class RecordingProgressReporter:
+    """Record progress-reporter calls made by browser orchestration."""
+
+    def __init__(self):
+        self.operational_statuses: list[str] = []
+        self.flush_count = 0
+
+    async def accept_operational_status(self, status: str) -> None:
+        self.operational_statuses.append(status)
+
+    async def flush_if_needed(self) -> None:
+        self.flush_count += 1
 
 
 def install_fake_session(monkeypatch: pytest.MonkeyPatch, client: FakeBrowserClient) -> None:
@@ -185,34 +198,29 @@ def test_agent_runs_stages_in_order_and_extracts_once_after_collection(
 def test_agent_emits_labelled_operational_milestones_without_stage_reports(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Pipeline operations use the shared progress reporter without exposing report fields."""
+    """Pipeline operations use reporter APIs without exposing report fields or flush policy."""
 
     client = FakeBrowserClient(["https://example.test/start"] * 4)
     install_fake_session(monkeypatch, client)
     install_successful_pipeline(monkeypatch)
-    messages: list[str | None] = []
-
-    async def deliver(progress: float, total: float | None, message: str | None) -> None:
-        messages.append(message)
-
-    reporter = ReasoningProgressReporter(0, 0, deliver)
+    reporter = RecordingProgressReporter()
 
     asyncio.run(
-        browser_agent_module.BrowserAgent(settings(), reporter).run(
+        browser_agent_module.BrowserAgent(settings(), reporter).run(  # type: ignore[arg-type]
             "https://example.test/", "clean"
         )
     )
 
-    assert messages == [
-        "[status] Initial navigation",
-        "[status] Access",
-        "[status] Discovery",
-        "[status] Reset",
-        "[status] Reconstruction",
-        "[status] Collection",
-        "[status] Final extraction and cleaning",
+    assert reporter.operational_statuses == [
+        "Initial navigation",
+        "Access",
+        "Discovery",
+        "Reset",
+        "Reconstruction",
+        "Collection",
+        "Final extraction and cleaning",
     ]
-    assert not any("Report view" in message for message in messages if message is not None)
+    assert reporter.flush_count == 1
 
 
 def test_agent_action_restores_original_tab_and_uses_fresh_snapshot(

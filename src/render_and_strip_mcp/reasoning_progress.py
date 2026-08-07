@@ -4,40 +4,31 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
+
+from fastmcp import Context
 
 logger = logging.getLogger(__name__)
 
-ProgressDelivery = Callable[[float, float | None, str | None], Awaitable[None]]
 Clock = Callable[[], float]
 
 
 class ReasoningProgressReporter:
-    """Apply invocation-wide limits and coalescing to reasoning and operational items."""
+    """Batch and rate-limit best-effort reasoning and operational progress deliveries."""
 
     def __init__(
         self,
         maximum_items: int,
         minimum_interval_seconds: float,
-        deliver_progress: ProgressDelivery | None,
+        context: Context,
         clock: Clock = time.monotonic,
     ):
         self._maximum_items = maximum_items
         self._minimum_interval_seconds = minimum_interval_seconds
-        self._deliver_progress = deliver_progress
+        self._context = context
         self._clock = clock
-        self._accepted_item_count = 0
-        self._last_delivery_time: float | None = None
+        self._last_delivery_time = 0
         self._buffered_fragments: list[str] = []
-        self._delivery_enabled = deliver_progress is not None
-        if deliver_progress is None:
-            logger.warning("Reasoning progress delivery is unavailable for this invocation.")
-
-    @property
-    def accepted_item_count(self) -> int:
-        """Return the invocation-wide count of accepted reasoning and status items."""
-
-        return self._accepted_item_count
 
     async def accept(self, reasoning_fragment: str) -> None:
         """Accept one reasoning fragment or status item under the shared configured policy."""
@@ -45,42 +36,34 @@ class ReasoningProgressReporter:
         normalized_fragment = reasoning_fragment.strip()
         if not normalized_fragment:
             return
-        if self._maximum_items and self._accepted_item_count >= self._maximum_items:
-            return
-        self._accepted_item_count += 1
         self._buffered_fragments.append(normalized_fragment)
-        if self._minimum_interval_seconds == 0:
-            await self.flush()
-            return
-        current_time = self._clock()
-        if (
-            self._last_delivery_time is None
-            or current_time - self._last_delivery_time >= self._minimum_interval_seconds
-        ):
-            await self.flush()
+        await self.flush_if_needed()
 
     async def accept_operational_status(self, status: str) -> None:
         """Submit a clearly labelled orchestration milestone to the shared progress stream."""
 
         await self.accept(f"[status] {status}")
 
-    async def flush(self) -> None:
-        """Immediately send any buffered reasoning text without changing the item count."""
+    async def flush_if_needed(self) -> None:
+        """Deliver the next buffered batch only when the configured interval permits it."""
 
         if not self._buffered_fragments:
             return
-        message = "\n".join(self._buffered_fragments)
-        self._buffered_fragments.clear()
-        if not self._delivery_enabled or self._deliver_progress is None:
+        time_since_last_delivery = self._clock() - self._last_delivery_time
+        if time_since_last_delivery < self._minimum_interval_seconds:
             return
+        if self._maximum_items:
+            batch_fragments = self._buffered_fragments[: self._maximum_items]
+            del self._buffered_fragments[: self._maximum_items]
+        else:
+            batch_fragments = self._buffered_fragments
+            self._buffered_fragments = []
         try:
-            await self._deliver_progress(
-                self._accepted_item_count,
-                self._maximum_items or None,
-                message,
+            await self._context.report_progress(
+                progress=len(batch_fragments),
+                message="\n".join(batch_fragments),
             )
         except Exception as error:
-            self._delivery_enabled = False
             logger.warning("Reasoning progress delivery failed: %s", error)
             return
         self._last_delivery_time = self._clock()

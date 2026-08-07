@@ -21,9 +21,9 @@ def create_server(settings: Settings) -> FastMCP:
         """Render a page, complete a browser task, and return clean semantic HTML only."""
 
         reasoning_progress = ReasoningProgressReporter(
-            settings.progress.reasoning_progress_max_items,
-            settings.progress.reasoning_progress_min_interval_seconds,
-            context.report_progress,
+            maximum_items=settings.progress.reasoning_progress_max_items,
+            minimum_interval_seconds=settings.progress.reasoning_progress_min_interval_seconds,
+            context=context,
         )
         agent = BrowserAgent(settings, reasoning_progress)
         try:

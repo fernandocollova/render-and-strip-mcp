@@ -69,8 +69,7 @@ class BrowserAgent:
                     )
                     session = await session_manager.__aenter__()
                     final_html = await self._run_session(session, url, task)
-            except TimeoutError as error:
-                raise ExecutionLimitError("Total invocation time limit exceeded.") from error
+            except TimeoutError as error:                raise ExecutionLimitError("Total invocation time limit exceeded.") from error
         except litellm.ContextWindowExceededError as error:
             translated_error = BrowserAgentError(f"Model context exhausted: {error}")
             primary_error = translated_error
@@ -88,7 +87,7 @@ class BrowserAgent:
             raise
         finally:
             if self._reasoning_progress is not None:
-                await self._reasoning_progress.flush()
+                await self._reasoning_progress.flush_if_needed()
             if session is not None:
                 try:
                     await self._close_browser(session.client)

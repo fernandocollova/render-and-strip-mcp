@@ -69,7 +69,7 @@ async def run_stage(
         except TimeoutError as error:
             raise ExecutionLimitError("Model request time limit exceeded.") from error
         if reasoning_progress is not None:
-            await reasoning_progress.flush()
+            await reasoning_progress.flush_if_needed()
         if model_turn.tool_call is None:
             raise MissingStageCompletionError(
                 f"The {completion_tool.stage_name} stage stopped without its required "

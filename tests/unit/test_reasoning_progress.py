@@ -1,9 +1,9 @@
-"""Tests for optional model-reasoning progress reporting."""
+"""Tests for best-effort model-reasoning progress reporting."""
 
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pytest
 
@@ -20,15 +20,24 @@ class FakeClock:
         return self.current_time
 
 
-def test_unlimited_immediate_reasoning_progress_skips_empty_fragments() -> None:
-    """Zero interval emits every accepted non-empty normalized reasoning item immediately."""
+@dataclass
+class FakeProgressContext:
+    """Capture progress reports sent through the FastMCP context boundary."""
 
-    notifications: list[tuple[float, float | None, str | None]] = []
+    notifications: list[tuple[float, str | None]] = field(default_factory=list)
+    delivery_error: Exception | None = None
 
-    async def deliver(progress: float, total: float | None, message: str | None) -> None:
-        notifications.append((progress, total, message))
+    async def report_progress(self, *, progress: float, message: str | None = None) -> None:
+        self.notifications.append((progress, message))
+        if self.delivery_error is not None:
+            raise self.delivery_error
 
-    reporter = ReasoningProgressReporter(0, 0, deliver)
+
+def test_zero_interval_delivers_non_blank_fragments_immediately() -> None:
+    """Each non-blank fragment is delivered immediately when the interval is zero."""
+
+    context = FakeProgressContext()
+    reporter = ReasoningProgressReporter(0, 0, context)  # type: ignore[arg-type]
 
     async def exercise() -> None:
         await reporter.accept("  ")
@@ -37,144 +46,92 @@ def test_unlimited_immediate_reasoning_progress_skips_empty_fragments() -> None:
 
     asyncio.run(exercise())
 
-    assert reporter.accepted_item_count == 2
-    assert notifications == [(1, None, "first"), (2, None, "second")]
+    assert context.notifications == [(1, "first"), (1, "second")]
 
 
-def test_reasoning_limit_applies_across_turns() -> None:
-    """A positive item maximum persists across independent model-turn callbacks."""
-
-    notifications: list[tuple[float, float | None, str | None]] = []
-
-    async def deliver(progress: float, total: float | None, message: str | None) -> None:
-        notifications.append((progress, total, message))
-
-    reporter = ReasoningProgressReporter(2, 0, deliver)
-
-    async def exercise() -> None:
-        await reporter.accept("first turn")
-        await reporter.accept("second turn")
-        await reporter.accept("discarded third turn")
-
-    asyncio.run(exercise())
-
-    assert reporter.accepted_item_count == 2
-    assert notifications == [(1, 2, "first turn"), (2, 2, "second turn")]
-
-
-def test_operational_status_and_reasoning_share_one_ordered_item_limit() -> None:
-    """Milestones consume the same invocation-wide budget in their actual acceptance order."""
-
-    notifications: list[tuple[float, float | None, str | None]] = []
-
-    async def deliver(progress: float, total: float | None, message: str | None) -> None:
-        notifications.append((progress, total, message))
-
-    reporter = ReasoningProgressReporter(3, 10, deliver)
-
-    async def exercise() -> None:
-        await reporter.accept_operational_status("Initial navigation")
-        await reporter.accept("model checks the report")
-        await reporter.accept_operational_status("Access")
-        await reporter.accept("discarded")
-        await reporter.flush()
-
-    asyncio.run(exercise())
-
-    assert reporter.accepted_item_count == 3
-    assert notifications == [
-        (1, 3, "[status] Initial navigation"),
-        (3, 3, "model checks the report\n[status] Access"),
-    ]
-
-
-def test_reconstruction_reasoning_is_forwarded_without_orchestration_serializing_checkpoint() -> (
-    None
-):
-    """The shared stream preserves model text that refers to its reconstruction context."""
-
-    notifications: list[str | None] = []
-
-    async def deliver(progress: float, total: float | None, message: str | None) -> None:
-        notifications.append(message)
-
-    reporter = ReasoningProgressReporter(0, 0, deliver)
-
-    asyncio.run(reporter.accept("Checkpoint says the report heading must be visible."))
-
-    assert notifications == ["Checkpoint says the report heading must be visible."]
-
-
-def test_positive_interval_coalesces_then_flushes_pending_text() -> None:
-    """Positive intervals coalesce normal notifications while end-of-turn flush bypasses delay."""
+def test_positive_batch_limit_retains_later_fragments_in_order() -> None:
+    """A positive maximum bounds each delivery without capping the invocation."""
 
     clock = FakeClock()
-    notifications: list[tuple[float, float | None, str | None]] = []
-
-    async def deliver(progress: float, total: float | None, message: str | None) -> None:
-        notifications.append((progress, total, message))
-
-    reporter = ReasoningProgressReporter(0, 5, deliver, clock)
+    context = FakeProgressContext()
+    reporter = ReasoningProgressReporter(2, 5, context, clock)  # type: ignore[arg-type]
 
     async def exercise() -> None:
         await reporter.accept("first")
         clock.current_time = 1
         await reporter.accept("second")
-        clock.current_time = 5
-        await reporter.accept("third")
-        clock.current_time = 6
+        await reporter.accept_operational_status("Access")
         await reporter.accept("fourth")
-        await reporter.flush()
+        clock.current_time = 5
+        await reporter.flush_if_needed()
+        clock.current_time = 10
+        await reporter.flush_if_needed()
 
     asyncio.run(exercise())
 
-    assert notifications == [
-        (1, None, "first"),
-        (3, None, "second\nthird"),
-        (4, None, "fourth"),
+    assert context.notifications == [
+        (1, "first"),
+        (2, "second\n[status] Access"),
+        (1, "fourth"),
     ]
 
 
-def test_reasoning_item_boundaries_are_provider_dependent() -> None:
-    """Each non-empty provider delta is one item regardless of text equivalence."""
+def test_unlimited_batch_delivers_all_buffered_fragments_when_eligible() -> None:
+    """A zero maximum leaves the next eligible batch unbounded."""
 
-    async def deliver(progress: float, total: float | None, message: str | None) -> None:
-        return None
-
-    one_fragment_reporter = ReasoningProgressReporter(0, 0, deliver)
-    two_fragment_reporter = ReasoningProgressReporter(0, 0, deliver)
-
-    async def exercise() -> None:
-        await one_fragment_reporter.accept("combined reasoning")
-        await two_fragment_reporter.accept("combined ")
-        await two_fragment_reporter.accept("reasoning")
-
-    asyncio.run(exercise())
-
-    assert one_fragment_reporter.accepted_item_count == 1
-    assert two_fragment_reporter.accepted_item_count == 2
-
-
-def test_progress_delivery_failure_disables_future_notifications(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Missing or failing delivery never interrupts model execution or retries reporting."""
-
-    attempts: list[str | None] = []
-
-    async def fail_delivery(progress: float, total: float | None, message: str | None) -> None:
-        attempts.append(message)
-        raise RuntimeError("notification unavailable")
-
-    reporter = ReasoningProgressReporter(0, 0, fail_delivery)
+    clock = FakeClock()
+    context = FakeProgressContext()
+    reporter = ReasoningProgressReporter(0, 5, context, clock)  # type: ignore[arg-type]
 
     async def exercise() -> None:
         await reporter.accept("first")
+        clock.current_time = 1
         await reporter.accept("second")
-        await reporter.flush()
+        await reporter.accept("third")
+        clock.current_time = 5
+        await reporter.flush_if_needed()
 
     asyncio.run(exercise())
 
-    assert reporter.accepted_item_count == 2
-    assert attempts == ["first"]
+    assert context.notifications == [(1, "first"), (2, "second\nthird")]
+
+
+def test_flush_if_needed_does_not_bypass_a_positive_interval() -> None:
+    """Cleanup checks leave pending fragments buffered until the interval elapses."""
+
+    clock = FakeClock()
+    context = FakeProgressContext()
+    reporter = ReasoningProgressReporter(0, 5, context, clock)  # type: ignore[arg-type]
+
+    async def exercise() -> None:
+        await reporter.accept("first")
+        clock.current_time = 1
+        await reporter.accept("second")
+        clock.current_time = 4
+        await reporter.flush_if_needed()
+        clock.current_time = 5
+        await reporter.flush_if_needed()
+
+    asyncio.run(exercise())
+
+    assert context.notifications == [(1, "first"), (1, "second")]
+
+
+def test_delivery_failure_is_non_fatal_and_later_batches_remain_eligible(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A reporting error does not prevent a later progress delivery attempt."""
+
+    context = FakeProgressContext(delivery_error=RuntimeError("notification unavailable"))
+    reporter = ReasoningProgressReporter(0, 0, context)  # type: ignore[arg-type]
+
+    async def exercise() -> None:
+        await reporter.accept("first")
+        context.delivery_error = None
+        await reporter.accept("second")
+        await reporter.flush_if_needed()
+
+    asyncio.run(exercise())
+
+    assert context.notifications == [(1, "first"), (1, "second")]
     assert "Reasoning progress delivery failed" in caplog.text

@@ -56,6 +56,20 @@ def access_completion_turn() -> ModelTurn:
     )
 
 
+class RecordingProgressReporter:
+    """Record model-reasoning and lifecycle calls from the stage runner."""
+
+    def __init__(self):
+        self.reasoning_fragments: list[str] = []
+        self.flush_count = 0
+
+    async def accept(self, reasoning_fragment: str) -> None:
+        self.reasoning_fragments.append(reasoning_fragment)
+
+    async def flush_if_needed(self) -> None:
+        self.flush_count += 1
+
+
 def test_stage_runner_uses_fresh_compact_context_and_local_completion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -108,6 +122,41 @@ def test_stage_runner_uses_fresh_compact_context_and_local_completion(
     assert "text=<6 chars omitted>" in second_user_message
     assert "new snapshot" in second_user_message
     assert '"role": "tool"' not in second_user_message
+
+
+def test_stage_runner_uses_public_interval_respecting_progress_flush(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A completed model turn delegates progress timing to the reporter's public API."""
+
+    reporter = RecordingProgressReporter()
+
+    async def fake_stream_model_turn(*arguments: object) -> ModelTurn:
+        reasoning_callback = arguments[3]
+        assert callable(reasoning_callback)
+        await reasoning_callback("model reasoning")
+        return access_completion_turn()
+
+    async def unused_action(*arguments: object) -> PageState:
+        raise AssertionError("remote action should not execute")
+
+    monkeypatch.setattr(agent_loop, "stream_model_turn", fake_stream_model_turn)
+
+    asyncio.run(
+        agent_loop.run_stage(
+            llm_settings(),
+            AgentSettings(),
+            catalog(),
+            ACCESS_COMPLETION_TOOL,
+            "task",
+            PageState("snapshot", "https://example.test/"),
+            unused_action,
+            reporter,  # type: ignore[arg-type]
+        )
+    )
+
+    assert reporter.reasoning_fragments == ["model reasoning"]
+    assert reporter.flush_count == 1
 
 
 def test_stage_context_exposes_only_permitted_prior_stage_inputs() -> None:
