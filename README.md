@@ -7,9 +7,10 @@ render_and_strip_page(url, task) -> clean semantic HTML
 ```
 
 For each request it opens a fresh isolated session with an official Playwright MCP server, uses a
-tool-calling model to reach the requested page or view and greedily retain its revealable content,
-validates the final top-level origin, and returns only a cleaned semantic HTML document containing
-safe visible whole-page text. Failures are MCP tool errors; partial HTML is never returned.
+tool-calling model to reach the requested page or view and greedily collect its revealable retained
+or same-origin paginated content, validates every top-level origin, and returns only one cleaned
+semantic HTML document containing safe visible whole-page text. Failures are MCP tool errors;
+partial HTML is never returned.
 
 ## Requirements
 
@@ -58,11 +59,14 @@ it.
 - Default execution limits are 12 model turns, 30 browser actions, 600 total seconds, 20
   navigation seconds, 15 action seconds, 90 model-request seconds, a 0-second optional settle
   grace, and 10 cleanup seconds. The model-turn and browser-action limits apply independently to
-  each of access, discovery, reconstruction, and collection; total time remains invocation-wide.
+  access, discovery, reconstruction, each retained-document collection, and each pagination-advance
+  iteration; total time remains invocation-wide. `max_paginated_documents` defaults to 25 captured
+  pages across the invocation. Reaching that limit succeeds only if the final page's semantic or
+  natural completion assessment succeeds; otherwise the request fails without partial HTML.
   Navigation calls use the navigation timeout, while each other browser operation (tab handling,
-  URL checks, snapshots, actions, and final extraction) uses its own action timeout.
-- `max_html_bytes = 0` permits unlimited clean HTML. A positive overage is an error, not a
-  truncation.
+  URL checks, snapshots, actions, and document capture) uses its own action timeout.
+- `max_html_bytes = 0` permits unlimited clean HTML. A positive limit applies to the complete
+  assembled UTF-8 result; an overage is an error, not a truncation.
 - Optional reasoning progress uses `reasoning_progress_max_items = 0` and
   `reasoning_progress_min_interval_seconds = 0` for unlimited, immediate forwarding. These existing
   settings govern one shared stream of provider `reasoning_content` and labelled operational
@@ -71,12 +75,14 @@ it.
 
 ### Greedy page/view retrieval
 
-`render_and_strip_page` always uses a four-stage greedy pipeline; there is no public opt-out. The
-access stage establishes a semantic page/view checkpoint rather than extracting individual facts.
-Discovery inspects and, when safe, probes reveal mechanisms and records evidence. It supports only
-the `retained-final-document` strategy: relevant content must coexist in the final visible document.
-Unsafe, ambiguous, replacing, virtualized, mixed, unsupported, or unproven behavior is `unknown`
-and fails without a reset, collection, partial result, or HTML output.
+`render_and_strip_page(url, task)` keeps its two-input public signature and has no greedy-collection
+opt-out. The access stage establishes a semantic page/view checkpoint rather than extracting
+individual facts. Discovery inspects and, when safe, probes both retained reveal and immediate
+page-advance mechanisms. It can select `retained-final-document` when relevant content can coexist
+in one final visible document, or `paginated-documents` when a proven immediate Next/numbered action
+replaces the current same-origin result document and retained collection can run on each page.
+Unsafe, ambiguous, virtualized, mixed, unsupported, or unproven behavior is `unknown` and fails
+without a reset, collection, partial result, or HTML output.
 
 After discovery, the service navigates the original tab in the same browser context to the exact
 caller URL and reconstructs the checkpoint semantically from fresh controls. It does not replay
@@ -86,13 +92,24 @@ effects, the model must use a semantic wait or investigation action before compl
 continues to reveal relevant content until a configured stage or total limit is reached fails rather
 than returning an incomplete document.
 
+For `paginated-documents`, the same retained-document collection runs independently on each result
+page. The service captures that whole visibility-filtered page before an immediate next-page action
+can replace it. A dedicated model stage uses the original task and compact cumulative progress to
+decide whether later pages can still be relevant. Natural terminal pagination is the default when
+the task has no explicit cutoff; uncertainty causes continuation rather than early completion. A
+semantic boundary preserves its complete captured page. Traversal never treats record-detail,
+`Read more`, or expanded-reading links as pagination, and unchanged or repeated page states fail
+instead of duplicating content. Put semantic cutoffs directly in `task`, for example “retrieve
+releases through version 2.0”; there is no site-, date-, or version-specific parser.
+
 Every model-directed action is followed by an orchestration-owned fresh `browser_snapshot` after
 the optional settle grace. The service restores the original tab and enforces the origin established
-by initial navigation before each snapshot and once more before final extraction. Only after a
-complete collection report does it retrieve the visible top-level DOM once and apply the existing
-cleaner policy. Cleaning may intentionally omit DOM content under its visibility, element,
-attribute, and size policies; the service does not perform fine-grained fact extraction, verify
-facts after cleaning, or return partial or multi-document results.
+by initial navigation before each snapshot and document capture. Only after the selected strategy
+completes does it clean the captured HTML. One capture uses the existing cleaner output unchanged;
+multiple captures resolve links against their respective source URLs and place complete cleaned
+bodies in ordered sections under one valid HTML document. Cleaning may intentionally omit DOM
+content under its visibility, element, attribute, and size policies; the service does not perform
+fine-grained fact extraction, verify facts after cleaning, or return partial captures.
 
 ## Tested local dependency stack
 
