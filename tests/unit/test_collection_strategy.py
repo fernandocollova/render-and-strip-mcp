@@ -81,4 +81,8 @@ def test_retained_strategy_returns_only_a_complete_final_page_state(
 def test_strategy_dispatch_has_no_unknown_handler() -> None:
     """Unsupported discovery does not silently select a fallback collection implementation."""
 
-    assert set(collection_strategy.COLLECTION_STRATEGIES) == {"retained-final-document"}
+    assert set(collection_strategy.COLLECTION_STRATEGIES) == {
+        "retained-final-document",
+        "paginated-documents",
+    }
+    assert "unknown" not in collection_strategy.COLLECTION_STRATEGIES

@@ -23,6 +23,7 @@ class StageRunResult:
 
     report: StageReportValue
     page_state: PageState
+    browser_action_count: int = 0
 
 
 @dataclass
@@ -82,7 +83,7 @@ class StageRunner:
                 )
             if model_turn.tool_call.kind == "completion":
                 report = completion_tool.parse(model_turn.tool_call.arguments)
-                return StageRunResult(report, state.current_state)
+                return StageRunResult(report, state.current_state, state.browser_action_count)
             if model_turn.tool_call.kind != "remote":
                 raise ModelStreamError("Model requested an unsupported tool-call route.")
             if turn_index == self.agent_settings.max_model_turns - 1:

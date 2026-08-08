@@ -9,8 +9,23 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from .errors import MalformedStageCompletionError
 
-StageName: TypeAlias = Literal["access", "discovery", "reconstruction", "collection"]
-DiscoveryStrategy: TypeAlias = Literal["retained-final-document", "unknown"]
+StageName: TypeAlias = Literal[
+    "access",
+    "discovery",
+    "reconstruction",
+    "collection",
+    "pagination-advance",
+]
+CollectionStrategy: TypeAlias = Literal[
+    "retained-final-document",
+    "paginated-documents",
+]
+DiscoveryStrategy: TypeAlias = Literal[
+    "retained-final-document",
+    "paginated-documents",
+    "unknown",
+]
+PaginationAdvanceStatus: TypeAlias = Literal["advanced", "complete"]
 
 
 class StageReport(BaseModel):
@@ -74,13 +89,15 @@ class AccessCheckpoint(StageReport):
 class DiscoveryReport(StageReport):
     """Handoff from discovery that selects or rejects a collection strategy.
 
-    Its evidence explains whether target content can safely remain in the final visible document.
+    Its evidence explains which supported document-retention behavior was established, if any.
     """
 
     strategy: DiscoveryStrategy = Field(
         description=(
             "Choose retained-final-document only when relevant revealed content can coexist in "
-            "the final visible document; otherwise choose unknown."
+            "one final visible document. Choose paginated-documents only when an immediate "
+            "same-origin next-page action replaces the result document and each page supports "
+            "retained-document collection. Otherwise choose unknown."
         )
     )
     evidence: list[str] = Field(
@@ -145,8 +162,53 @@ class CollectionReport(StageReport):
         return values
 
 
+class PaginationAdvanceReport(StageReport):
+    """Outcome and compact cumulative handoff from one page-advance iteration."""
+
+    status: PaginationAdvanceStatus = Field(
+        description=(
+            "Report advanced only after activating one enabled immediate next-page control. "
+            "Report complete only when no such control remains or established ordering proves "
+            "that later pages cannot satisfy the task."
+        )
+    )
+    progress: str = Field(
+        min_length=1,
+        max_length=4000,
+        description=(
+            "A compact cumulative semantic summary of pagination progress needed to assess later "
+            "pages. Replace the prior summary; do not include raw page content or action history."
+        ),
+    )
+    evidence: list[str] = Field(
+        min_length=1,
+        description="List observations supporting the advancement or completion result.",
+    )
+
+    @field_validator("progress")
+    @classmethod
+    def validate_progress(cls, value: str) -> str:
+        """Reject a blank cross-page progress handoff."""
+
+        _require_semantic_text(value, "progress")
+        return value
+
+    @field_validator("evidence")
+    @classmethod
+    def validate_evidence(cls, values: list[str]) -> list[str]:
+        """Require semantic evidence for the pagination assessment."""
+
+        for value in values:
+            _require_semantic_text(value, "evidence")
+        return values
+
+
 StageReportValue: TypeAlias = (
-    AccessCheckpoint | DiscoveryReport | ReconstructionReport | CollectionReport
+    AccessCheckpoint
+    | DiscoveryReport
+    | ReconstructionReport
+    | CollectionReport
+    | PaginationAdvanceReport
 )
 
 
@@ -199,6 +261,10 @@ RECONSTRUCTION_COMPLETION_TOOL = CompletionTool(
 COLLECTION_COMPLETION_TOOL = CompletionTool(
     "complete_collection",
     CollectionReport,
+)
+PAGINATION_ADVANCE_COMPLETION_TOOL = CompletionTool(
+    "complete_pagination_advance",
+    PaginationAdvanceReport,
 )
 
 

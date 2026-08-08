@@ -50,6 +50,7 @@ class AgentSettings(StrictSettingsModel):
     allow_plain_http: bool = False
     max_model_turns: PositiveInteger = 12
     max_browser_actions: PositiveInteger = 30
+    max_paginated_documents: PositiveInteger = 25
     total_timeout_seconds: PositiveSeconds = 600
     navigation_timeout_seconds: PositiveSeconds = 20
     browser_action_timeout_seconds: PositiveSeconds = 15

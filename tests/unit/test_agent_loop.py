@@ -12,6 +12,7 @@ from render_and_strip_mcp.agent_context import (
     CollectionStage,
     DiscoveryStage,
     PageState,
+    PaginationAdvanceStage,
     ReconstructionStage,
 )
 from render_and_strip_mcp.config import AgentSettings, LlmSettings
@@ -22,6 +23,7 @@ from render_and_strip_mcp.stage_models import (
     ACCESS_COMPLETION_TOOL,
     COLLECTION_COMPLETION_TOOL,
     DISCOVERY_COMPLETION_TOOL,
+    PAGINATION_ADVANCE_COMPLETION_TOOL,
     RECONSTRUCTION_COMPLETION_TOOL,
     AccessCheckpoint,
 )
@@ -131,6 +133,7 @@ def test_stage_runner_uses_fresh_compact_context_and_local_completion(
     )
 
     assert result.page_state == PageState("new snapshot", "https://example.test/next")
+    assert result.browser_action_count == 1
     assert [[message["role"] for message in messages] for messages in observed_messages] == [
         ["system", "user"],
         ["system", "user"],
@@ -192,6 +195,15 @@ def test_stage_context_exposes_only_permitted_prior_stage_inputs() -> None:
         current_state,
         preceding_state=preceding_state,
     )
+    pagination = PaginationAdvanceStage(
+        captured_document_count=3,
+        progress="Pages 1-3 cover releases through version 2.0.",
+    ).build_messages(
+        "task",
+        [],
+        current_state,
+        preceding_state=preceding_state,
+    )
 
     assert "Access checkpoint" not in access[1]["content"]
     assert "Access checkpoint" not in discovery[1]["content"]
@@ -201,6 +213,10 @@ def test_stage_context_exposes_only_permitted_prior_stage_inputs() -> None:
     assert "retained-final-document" in collection[1]["content"]
     assert "before probe" in collection[1]["content"]
     assert "browser_navigate" not in collection[1]["content"]
+    assert "Report view" not in pagination[1]["content"]
+    assert "Captured document count:\n3" in pagination[1]["content"]
+    assert "Pages 1-3 cover releases through version 2.0." in pagination[1]["content"]
+    assert "before probe" in pagination[1]["content"]
 
 
 def test_stage_prompts_define_page_retrieval_waiting_and_completion_contracts() -> None:
@@ -223,14 +239,32 @@ def test_stage_prompts_define_page_retrieval_waiting_and_completion_contracts() 
         "collection": CollectionStage("retained-final-document").build_messages(
             "task", [], state
         ),
+        "pagination": PaginationAdvanceStage(1).build_messages("task", [], state),
     }
 
     for messages in messages_by_stage.values():
         assert [message["role"] for message in messages] == ["system", "user"]
         assert "Complete only by calling complete_" in messages[0]["content"]
     assert "page/view retrieval" in messages_by_stage["access"][0]["content"]
-    assert "unknown" in messages_by_stage["discovery"][0]["content"]
+    discovery_prompt = messages_by_stage["discovery"][0]["content"]
+    assert "Ignore controls not plausibly related" in discovery_prompt
+    assert "scrolling, disclosure, additive loading" in discovery_prompt
+    assert "Probe one transition at a time" in discovery_prompt
+    assert "Do not submit forms" in discovery_prompt
+    assert "create, update, or delete data" in discovery_prompt
+    assert "An unrelated or redundant ambiguous control alone" in discovery_prompt
+    assert "prevents establishing a complete supported collection path" in discovery_prompt
+    assert "choose unknown" in discovery_prompt
     assert "semantic waits" in messages_by_stage["collection"][0]["content"]
+    pagination_prompt = messages_by_stage["pagination"][0]["content"]
+    assert pagination_prompt.startswith(
+        "Assess whether pagination should stop at the current result page or advance exactly one"
+    )
+    assert "has been captured" not in pagination_prompt
+    assert "natural terminal page" in pagination_prompt
+    assert "uncertain, continue" in pagination_prompt
+    assert "Read more" in pagination_prompt
+    assert "site-, date-, or record-specific parsing" in pagination_prompt
 
 
 def test_stage_runner_rejects_ordinary_terminal_response(
@@ -382,10 +416,12 @@ def test_stage_classes_own_their_matching_completion_tools() -> None:
     assert DiscoveryStage().stage_name == "discovery"
     assert ReconstructionStage(checkpoint).stage_name == "reconstruction"
     assert CollectionStage("retained-final-document").stage_name == "collection"
+    assert PaginationAdvanceStage(1).stage_name == "pagination-advance"
     assert AccessStage().completion_tool is ACCESS_COMPLETION_TOOL
     assert DiscoveryStage().completion_tool is DISCOVERY_COMPLETION_TOOL
     assert ReconstructionStage(checkpoint).completion_tool is RECONSTRUCTION_COMPLETION_TOOL
     assert (
         CollectionStage("retained-final-document").completion_tool is COLLECTION_COMPLETION_TOOL
     )
+    assert PaginationAdvanceStage(1).completion_tool is PAGINATION_ADVANCE_COMPLETION_TOOL
     assert not hasattr(ACCESS_COMPLETION_TOOL, "stage_name")

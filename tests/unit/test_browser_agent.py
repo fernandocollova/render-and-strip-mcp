@@ -16,6 +16,7 @@ from render_and_strip_mcp.agent_loop import StageRunner, StageRunResult
 from render_and_strip_mcp.config import Settings
 from render_and_strip_mcp.errors import BrowserAgentError
 from render_and_strip_mcp.playwright_tools import PlaywrightSession, ToolCatalog
+from render_and_strip_mcp.rendered_document import RenderedDocument
 from render_and_strip_mcp.stage_models import (
     AccessCheckpoint,
     DiscoveryReport,
@@ -53,13 +54,19 @@ def text_result(text: str, is_error: bool = False) -> CallToolResult:
 class FakeBrowserClient:
     """Minimal official-MCP behavior with snapshots and optional action popup state."""
 
-    def __init__(self, locations: list[str], cleanup_error: bool = False):
+    def __init__(
+        self,
+        locations: list[str],
+        cleanup_error: bool = False,
+        document_html: list[str] | None = None,
+    ):
         self.calls: list[tuple[str, dict[str, object]]] = []
         self.timeouts: list[tuple[str, object | None]] = []
         self._locations = iter(locations)
         self._action_completed = False
         self._original_tab_selected = False
         self._cleanup_error = cleanup_error
+        self._document_html = iter(document_html or ["<html><head></head><body>Done</body></html>"])
 
     async def call_tool(
         self,
@@ -85,7 +92,7 @@ class FakeBrowserClient:
             return text_result("### Page\n- Fresh snapshot")
         if tool_name == "browser_evaluate":
             if arguments["function"] != "() => location.href":
-                return text_result('### Result\n"<html><head></head><body>Done</body></html>"')
+                return text_result(f"### Result\n{json.dumps(next(self._document_html))}")
             return text_result(
                 f"### Result\n{json.dumps(next(self._locations))}\n### Ran Playwright code"
             )
@@ -171,11 +178,17 @@ def install_successful_pipeline(
         raise AssertionError(f"Unexpected stage {stage_name}")
 
     async def fake_collection(
-        stage_runner: StageRunner, task: str, initial_state: PageState
-    ) -> PageState:
-        del stage_runner, task
+        stage_runner: StageRunner,
+        task: str,
+        initial_state: PageState,
+        capture_document: object,
+        max_paginated_documents: int,
+    ) -> list[RenderedDocument]:
+        del stage_runner, task, initial_state
+        assert callable(capture_document)
+        assert max_paginated_documents == 25
         pipeline_events.append("collection")
-        return initial_state
+        return [await capture_document()]
 
     monkeypatch.setattr(browser_agent_module.StageRunner, "run", fake_run_stage)
     monkeypatch.setitem(
@@ -206,6 +219,78 @@ def test_agent_runs_stages_in_order_and_extracts_once_after_collection(
     assert pipeline_events == ["access", "discovery", "reconstruction", "collection"]
     assert [tool_name for tool_name, _ in client.calls].count("browser_evaluate") == 5
     assert client.calls[-1] == ("browser_close", {})
+
+
+def test_agent_dispatches_paginated_collection_and_assembles_captured_documents(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The paginated handler receives capture, limit, and ordered output orchestration."""
+
+    page_one_url = "https://example.test/results?page=1"
+    page_two_url = "https://example.test/results?page=2"
+    client = FakeBrowserClient(
+        ["https://example.test/start"] * 3 + [page_one_url, page_two_url],
+        document_html=[
+            "<html><body><p>First page</p></body></html>",
+            "<html><body><p>Second page</p></body></html>",
+        ],
+    )
+    install_fake_session(monkeypatch, client)
+
+    async def fake_run_stage(
+        self: StageRunner,
+        stage: Stage,
+        task: str,
+        initial_state: PageState,
+    ) -> StageRunResult:
+        del self, task
+        if stage.stage_name == "access":
+            return StageRunResult(
+                AccessCheckpoint(target_state="Results", verification=["Results visible."]),
+                initial_state,
+            )
+        if stage.stage_name == "discovery":
+            return StageRunResult(
+                DiscoveryReport(
+                    strategy="paginated-documents",
+                    evidence=["Next replaced the same-origin results document."],
+                ),
+                initial_state,
+            )
+        if stage.stage_name == "reconstruction":
+            return StageRunResult(
+                ReconstructionReport(verified=True, evidence=["Results visible."]), initial_state
+            )
+        raise AssertionError(f"Unexpected stage {stage.stage_name}")
+
+    async def fake_paginated_collection(
+        stage_runner: StageRunner,
+        task: str,
+        initial_state: PageState,
+        capture_document: object,
+        max_paginated_documents: int,
+    ) -> list[RenderedDocument]:
+        del stage_runner, task, initial_state
+        assert callable(capture_document)
+        assert max_paginated_documents == 7
+        return [await capture_document(), await capture_document()]
+
+    monkeypatch.setattr(browser_agent_module.StageRunner, "run", fake_run_stage)
+    monkeypatch.setitem(
+        browser_agent_module.COLLECTION_STRATEGIES,
+        "paginated-documents",
+        fake_paginated_collection,
+    )
+
+    final_html = asyncio.run(
+        browser_agent_module.BrowserAgent(
+            settings(max_paginated_documents=7),
+            RecordingProgressReporter(),  # type: ignore[arg-type]
+        ).run("https://example.test/", "collect results")
+    )
+
+    assert final_html.index("First page") < final_html.index("Second page")
+    assert final_html.count("<section>") == 2
 
 
 def test_agent_emits_labelled_operational_milestones_without_stage_reports(

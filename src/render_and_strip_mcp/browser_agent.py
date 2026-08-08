@@ -22,13 +22,14 @@ from .errors import (
     UnknownDiscoveryStrategyError,
     UnsuccessfulStageOutcomeError,
 )
-from .html_cleaner import clean_rendered_html
+from .html_cleaner import clean_rendered_documents
 from .mcp_results import extract_json_string_result, extract_text_result
 from .playwright_tools import PlaywrightSession, open_playwright_session
 from .reasoning_progress import ReasoningProgressReporter
-from .rendered_document import fetch_visible_top_level_document
+from .rendered_document import RenderedDocument, fetch_visible_top_level_document
 from .stage_models import (
     AccessCheckpoint,
+    CollectionStrategy,
     DiscoveryReport,
     ReconstructionReport,
 )
@@ -99,7 +100,7 @@ class BrowserAgent:
         return final_html
 
     async def _run_session(self, session: PlaywrightSession, url: str, task: str) -> str:
-        """Run all greedy stages, then extract and clean the one complete final document."""
+        """Run all greedy stages, then clean the successfully captured documents."""
 
         await self._report_operational_status("Initial navigation")
         initial_navigation = await self._call_tool(
@@ -160,8 +161,9 @@ class BrowserAgent:
         discovery_report = cast(DiscoveryReport, discovery_result.report)
         if discovery_report.strategy == "unknown":
             raise UnknownDiscoveryStrategyError(
-                "Discovery could not establish retained-final-document collection."
+                "Discovery could not establish a supported collection strategy."
             )
+        collection_strategy = cast(CollectionStrategy, discovery_report.strategy)
 
         await self._report_operational_status("Reset")
         reset_navigation = await self._call_tool(
@@ -190,37 +192,58 @@ class BrowserAgent:
             )
 
         await self._report_operational_status("Collection")
-        collection_handler = COLLECTION_STRATEGIES[discovery_report.strategy]
-        await collection_handler(
+        collection_handler = COLLECTION_STRATEGIES[collection_strategy]
+
+        async def capture_document() -> RenderedDocument:
+            return await self._capture_rendered_document(
+                session.client,
+                original_tab_index,
+                initial_origin,
+            )
+
+        captured_documents = await collection_handler(
             stage_runner,
             task,
             reconstruction_result.page_state,
+            capture_document,
+            self._settings.agent.max_paginated_documents,
         )
 
         await self._report_operational_status("Final extraction and cleaning")
+        return clean_rendered_documents(
+            captured_documents,
+            self._settings.agent.allow_plain_http,
+            self._settings.output.max_html_bytes,
+        )
+
+    async def _capture_rendered_document(
+        self,
+        client: Client,
+        original_tab_index: int,
+        initial_origin: Origin,
+    ) -> RenderedDocument:
+        """Capture the current visibility-filtered document before later actions can replace it."""
+
         await select_original_tab(
-            session.client,
+            client,
             original_tab_index,
             self._settings.agent.browser_action_timeout_seconds,
         )
-        final_url = await self._current_url(session.client)
-        UrlPolicy(final_url, self._settings.agent.allow_plain_http).validate_observed_url(
+        source_url = await self._current_url(client)
+        UrlPolicy(source_url, self._settings.agent.allow_plain_http).validate_observed_url(
             initial_origin
         )
         try:
             async with asyncio.timeout(self._settings.agent.browser_action_timeout_seconds):
                 document_html = await fetch_visible_top_level_document(
-                    session.client,
+                    client,
                     self._settings.agent.browser_action_timeout_seconds,
                 )
         except TimeoutError as error:
-            raise ExecutionLimitError("Final document extraction time limit exceeded.") from error
-        return clean_rendered_html(
-            document_html,
-            final_url,
-            self._settings.agent.allow_plain_http,
-            self._settings.output.max_html_bytes,
-        )
+            raise ExecutionLimitError(
+                "Rendered document extraction time limit exceeded."
+            ) from error
+        return RenderedDocument(document_html, source_url)
 
     async def _execute_browser_action(
         self,

@@ -12,10 +12,11 @@ from .stage_models import (
     ACCESS_COMPLETION_TOOL,
     COLLECTION_COMPLETION_TOOL,
     DISCOVERY_COMPLETION_TOOL,
+    PAGINATION_ADVANCE_COMPLETION_TOOL,
     RECONSTRUCTION_COMPLETION_TOOL,
     AccessCheckpoint,
+    CollectionStrategy,
     CompletionTool,
-    DiscoveryStrategy,
     StageName,
 )
 
@@ -226,15 +227,29 @@ class AccessStage(Stage):
 
 
 class DiscoveryStage(Stage):
-    """Determine whether target content supports retained-document collection."""
+    """Determine which supported document-retention behavior the target content uses."""
 
     stage_name = "discovery"
     system_prompt = (
-        "Inspect the current target page/view for relevant reveal mechanisms. Safely probe when "
-        "needed to establish behavior, without a fixed probe count. Choose retained-final-document "
-        "only when revealed target content can coexist in the final visible document; choose "
-        "unknown for unsafe, unproven, replacing, virtualized, mixed, or ambiguous behavior. "
-        "Use semantic waits while effects are pending. Complete only by calling complete_discovery "
+        "Inspect the current target page/view for both relevant retained reveal mechanisms and "
+        "immediate page-advance mechanisms. Ignore controls not plausibly related to revealing or "
+        "advancing the caller's target result set. When behavior evidence is needed, probe only a "
+        "plausibly relevant control whose visible semantics indicate scrolling, disclosure, "
+        "additive loading, or immediate result-page advancement. Probe one transition at a time "
+        "and compare fresh observations before and after it. Do not submit forms; change target "
+        "filters or selections; authenticate; create, update, or delete data; start downloads; "
+        "follow record-detail links; or activate controls with uncertain effects. If an unsafe or "
+        "ambiguous control is plausibly relevant and leaving it unused prevents establishing a "
+        "complete supported collection path, do not activate it and choose unknown. An unrelated "
+        "or redundant ambiguous control alone is not a reason to choose unknown. Choose "
+        "retained-final-document only when revealed target content can coexist in one final "
+        "visible document. Choose paginated-documents only when an immediate Next or numbered "
+        "next-page "
+        "action replaces the current target-result document with another same-origin document and "
+        "retained-document collection can run on each page. Never infer pagination from "
+        "record-detail, Read more, or expanded-reading links. Choose unknown for unproven, "
+        "virtualized, mixed, unsupported, or completeness-blocking ambiguous behavior. Use "
+        "semantic waits while effects are pending. Complete only by calling complete_discovery "
         "with strategy and evidence."
     )
     completion_tool = DISCOVERY_COMPLETION_TOOL
@@ -266,7 +281,7 @@ class ReconstructionStage(Stage):
 class CollectionStage(Stage):
     """Exhaust content according to one selected discovery strategy."""
 
-    strategy: DiscoveryStrategy
+    strategy: CollectionStrategy
 
     stage_name = "collection"
     system_prompt = (
@@ -284,6 +299,42 @@ class CollectionStage(Stage):
         """Expose the strategy selected by discovery."""
 
         return [f"Selected collection strategy:\n{self.strategy}"]
+
+
+@dataclass(frozen=True)
+class PaginationAdvanceStage(Stage):
+    """Assess semantic completion or advance exactly one result page."""
+
+    captured_document_count: int
+    progress: str = ""
+
+    stage_name = "pagination-advance"
+    system_prompt = (
+        "Assess whether pagination should stop at the current result page or advance exactly one "
+        "result page for the original task. Interpret semantic cutoffs from the task without "
+        "inventing site-, date-, or record-specific parsing. Complete when established ordering "
+        "proves later pages cannot satisfy the task, preserving this whole boundary page, or when "
+        "no enabled immediate next-page control remains. If the task has no explicit cutoff, "
+        "continue to the natural terminal page. If ordering, cutoff satisfaction, or later-page "
+        "relevance is uncertain, continue. To continue, activate exactly one enabled immediate "
+        "Next or numbered next-page control and verify that it replaced the result document. Never "
+        "follow record-detail, Read more, or expanded-reading links. Report complete without first "
+        "taking a browser action; any iteration that takes an action must report advanced. "
+        "Complete only by calling "
+        "complete_pagination_advance with status, a replacement compact cumulative progress "
+        "summary, and evidence."
+    )
+    completion_tool = PAGINATION_ADVANCE_COMPLETION_TOOL
+    include_preceding_state = True
+
+    def additional_context(self) -> list[str]:
+        """Expose only deterministic count and compact prior semantic progress across pages."""
+
+        prior_progress = self.progress or "(no prior pagination progress)"
+        return [
+            f"Captured document count:\n{self.captured_document_count}",
+            f"Prior compact pagination progress:\n{prior_progress}",
+        ]
 
 
 def format_browser_action(

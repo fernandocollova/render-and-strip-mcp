@@ -15,7 +15,6 @@ import render_and_strip_mcp.agent_loop as agent_loop
 import render_and_strip_mcp.browser_agent as browser_agent_module
 from render_and_strip_mcp.browser_agent import BrowserAgent
 from render_and_strip_mcp.config import Settings
-from render_and_strip_mcp.errors import UnknownDiscoveryStrategyError
 from render_and_strip_mcp.model_stream import ModelTurn, RequestedToolCall
 from render_and_strip_mcp.playwright_tools import PlaywrightSession, ToolCatalog
 
@@ -57,6 +56,8 @@ class CategorizationBrowserClient:
         self.has_revealed_increment = False
         self.navigation_count = 0
         self.document_requests = 0
+        self.current_page = 1
+        self.clicked_controls: list[str] = []
 
     async def call_tool(
         self,
@@ -68,6 +69,7 @@ class CategorizationBrowserClient:
             assert arguments == {"url": REPORT_URL}
             self.navigation_count += 1
             self.has_revealed_increment = False
+            self.current_page = 1
             return text_result(self._snapshot())
         if tool_name == "browser_tabs":
             if arguments["action"] == "list":
@@ -84,10 +86,25 @@ class CategorizationBrowserClient:
             assert arguments == {"key": "End"}
             self.has_revealed_increment = True
             return text_result("### Page\n- Scroll action completed")
+        if tool_name == "browser_click":
+            assert self.page_kind == "numbered"
+            control = str(arguments["element"])
+            self.clicked_controls.append(control)
+            assert control == "Next"
+            assert self.current_page == 1
+            self.current_page = 2
+            return text_result("### Page\n- Next page navigation completed")
         if tool_name == "browser_evaluate":
             function = arguments["function"]
             if function == "() => location.href":
-                return text_result(f"### Result\n{json.dumps(REPORT_URL)}\n### Ran Playwright code")
+                current_url = (
+                    f"{REPORT_URL}?page={self.current_page}"
+                    if self.page_kind == "numbered"
+                    else REPORT_URL
+                )
+                return text_result(
+                    f"### Result\n{json.dumps(current_url)}\n### Ran Playwright code"
+                )
             self.document_requests += 1
             return text_result(f"### Result\n{json.dumps(self._document_html())}")
         if tool_name == "browser_close":
@@ -96,15 +113,23 @@ class CategorizationBrowserClient:
 
     def _snapshot(self) -> str:
         if self.page_kind == "numbered":
-            return (
-                "### Page\n# Reports\n- Page 1 of 3\n- [1] current\n"
-                "- [2] next page replaces the current document\n- Next page"
-            )
+            if self.current_page == 1:
+                return (
+                    "### Page\n# Reports\n- Page 1 of 2\n- Report 1\n- Read more\n"
+                    "- [2] next page replaces the current document\n- Next"
+                )
+            return "### Page\n# Reports\n- Page 2 of 2\n- Report 2\n- Read more\n- No Next"
         if self.has_revealed_increment:
             return "### Page\n# Reports\n- Item 1\n- Item 2\n- End of reports"
         return "### Page\n# Reports\n- Item 1\n- Scroll down to load more reports"
 
     def _document_html(self) -> str:
+        if self.page_kind == "numbered":
+            return (
+                "<html><head></head><body><main>"
+                f"<p>Report {self.current_page}</p><a href='detail'>Read more</a>"
+                "</main></body></html>"
+            )
         additional_item = "<p>Item 2</p>" if self.has_revealed_increment else ""
         return f"<html><head></head><body><main><p>Item 1</p>{additional_item}</main></body></html>"
 
@@ -118,7 +143,13 @@ def install_browser_session(
     async def fake_session(endpoint: str):
         yield PlaywrightSession(
             client=client,  # type: ignore[arg-type]
-            tool_catalog=ToolCatalog([], {"browser_press_key": "browser_press_key"}),
+            tool_catalog=ToolCatalog(
+                [],
+                {
+                    "browser_click": "browser_click",
+                    "browser_press_key": "browser_press_key",
+                },
+            ),
         )
 
     monkeypatch.setattr(browser_agent_module, "open_playwright_session", fake_session)
@@ -156,13 +187,19 @@ def install_categorizing_model(
                 },
             )
         if stage_name == "discovery" and page_kind == "numbered":
-            assert "next page replaces the current document" in user_message
-            reported_strategies.append("unknown")
+            if stage_turn_counts[stage_name] == 1:
+                assert "next page replaces the current document" in user_message
+                assert "Read more" in user_message
+                return _remote_turn("browser_click", {"element": "Next"})
+            assert "Page 2 of 2" in user_message
+            reported_strategies.append("paginated-documents")
             return _completion_turn(
                 "complete_discovery",
                 {
-                    "strategy": "unknown",
-                    "evidence": ["Numbered next-page navigation replaces the current document."],
+                    "strategy": "paginated-documents",
+                    "evidence": [
+                        "Immediate Next replaced page 1 with same-origin page 2; each is retained."
+                    ],
                 },
             )
         if stage_name == "discovery":
@@ -185,6 +222,14 @@ def install_categorizing_model(
                 {"verified": True, "evidence": ["The reports heading is visible."]},
             )
         if stage_name == "collection":
+            if page_kind == "numbered":
+                return _completion_turn(
+                    "complete_collection",
+                    {
+                        "complete": True,
+                        "evidence": ["The current static result page is fully retained."],
+                    },
+                )
             if stage_turn_counts[stage_name] == 1:
                 assert "Scroll down to load more reports" in user_message
                 return _remote_turn("browser_press_key", {"key": "End"})
@@ -194,6 +239,33 @@ def install_categorizing_model(
                 {
                     "complete": True,
                     "evidence": ["The observed end retains both report items."],
+                },
+            )
+        if stage_name == "pagination_advance":
+            if "Page 1 of 2" in user_message:
+                if "browser_click" not in user_message:
+                    assert "Captured document count:\n1" in user_message
+                    assert "(no prior pagination progress)" in user_message
+                    assert "Read more" in user_message
+                    return _remote_turn("browser_click", {"element": "Next"})
+                return _completion_turn(
+                    "complete_pagination_advance",
+                    {
+                        "status": "advanced",
+                        "progress": "Captured report page 1 of 2.",
+                        "evidence": ["Immediate Next replaced page 1 with page 2."],
+                    },
+                )
+            assert "Page 2 of 2" in user_message
+            assert "Actions:\n(no model-directed actions yet)" in user_message
+            assert "Captured document count:\n2" in user_message
+            assert "Captured report page 1 of 2." in user_message
+            return _completion_turn(
+                "complete_pagination_advance",
+                {
+                    "status": "complete",
+                    "progress": "Captured both report pages and reached the natural terminal.",
+                    "evidence": ["Page 2 has no enabled immediate Next control."],
                 },
             )
         raise AssertionError(f"Unexpected model stage {stage_name}")
@@ -245,23 +317,24 @@ def test_end_to_end_finite_incremental_scroll_is_retained_document(
     assert client.document_requests == 1
 
 
-def test_end_to_end_numbered_replacement_pagination_is_unknown(
+def test_end_to_end_numbered_replacement_pagination_collects_each_document(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Numbered replacement pagination fails before reset, collection, or partial extraction."""
+    """Proven numbered replacement pagination captures all pages without following detail links."""
 
     client = CategorizationBrowserClient("numbered")
     install_browser_session(monkeypatch, client)
     reported_strategies = install_categorizing_model(monkeypatch, "numbered")
 
-    with pytest.raises(UnknownDiscoveryStrategyError, match="could not establish"):
-        asyncio.run(
-            BrowserAgent(
-                settings(),
-                RecordingProgressReporter(),  # type: ignore[arg-type]
-            ).run(REPORT_URL, "Retrieve reports")
-        )
+    document_html = asyncio.run(
+        BrowserAgent(
+            settings(),
+            RecordingProgressReporter(),  # type: ignore[arg-type]
+        ).run(REPORT_URL, "Retrieve reports")
+    )
 
-    assert reported_strategies == ["unknown"]
-    assert client.navigation_count == 1
-    assert client.document_requests == 0
+    assert reported_strategies == ["paginated-documents"]
+    assert document_html.index("Report 1") < document_html.index("Report 2")
+    assert client.navigation_count == 2
+    assert client.document_requests == 2
+    assert client.clicked_controls == ["Next", "Next"]

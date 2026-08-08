@@ -32,7 +32,7 @@ class MalformedStageCompletionError(StageCompletionError):
 
 
 class UnknownDiscoveryStrategyError(StageCompletionError):
-    """Discovery could not establish a supported retained-document strategy."""
+    """Discovery could not establish a supported collection strategy."""
 
 
 class UnsupportedCollectionStrategyError(StageCompletionError):
@@ -41,6 +41,10 @@ class UnsupportedCollectionStrategyError(StageCompletionError):
 
 class UnsuccessfulStageOutcomeError(StageCompletionError):
     """A stage reported an explicitly unsuccessful terminal result."""
+
+
+class PaginationTransitionError(StageCompletionError):
+    """Pagination advancement did not produce a new uncollected result-page state."""
 
 
 class StageToolCollisionError(StageCompletionError):

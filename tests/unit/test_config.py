@@ -47,6 +47,7 @@ def test_settings_apply_documented_defaults() -> None:
     assert settings.agent.allow_plain_http is False
     assert settings.agent.max_model_turns == 12
     assert settings.agent.max_browser_actions == 30
+    assert settings.agent.max_paginated_documents == 25
     assert settings.agent.page_settle_seconds == 0
     assert settings.agent.cleanup_timeout_seconds == 10
     assert settings.output.max_html_bytes == 0
@@ -162,6 +163,19 @@ def test_plain_http_permission_can_be_configured() -> None:
         Settings.model_validate(
             valid_configuration() | {"agent": {"max_concurrent_invocations": 1}}
         )
+
+
+def test_paginated_document_limit_is_configurable_and_positive() -> None:
+    """Pagination has an invocation-wide positive document limit with no zero sentinel."""
+
+    settings = Settings.model_validate(
+        valid_configuration() | {"agent": {"max_paginated_documents": 7}}
+    )
+
+    assert settings.agent.max_paginated_documents == 7
+
+    with pytest.raises(ValidationError, match="max_paginated_documents"):
+        Settings.model_validate(valid_configuration() | {"agent": {"max_paginated_documents": 0}})
 
 
 def test_retired_concurrency_environment_setting_is_rejected(

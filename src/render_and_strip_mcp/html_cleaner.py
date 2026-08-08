@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 from .errors import BrowserAgentError
 from .html_elements import ALLOWED_TAGS, REMOVED_TAGS
 from .link_destination import sanitize_link_destination
+from .rendered_document import RenderedDocument
 
 
 def clean_rendered_html(
@@ -33,9 +34,42 @@ def clean_rendered_html(
     _remove_nontext_content(source_body)
     _clean_semantic_tags(source_body, final_url, allow_plain_http)
     cleaned_html = _serialize_document(source_body, document_title)
-    if maximum_html_bytes and len(cleaned_html.encode("utf-8")) > maximum_html_bytes:
-        raise BrowserAgentError("Clean HTML exceeds the configured UTF-8 byte limit.")
+    _enforce_output_limit(cleaned_html, maximum_html_bytes)
     return cleaned_html
+
+
+def clean_rendered_documents(
+    documents: list[RenderedDocument],
+    allow_plain_http: bool,
+    maximum_html_bytes: int,
+) -> str:
+    """Clean source-aware documents and assemble multiple bodies in capture order."""
+
+    if not documents:
+        raise BrowserAgentError("Collection completed without a rendered document.")
+    if len(documents) == 1:
+        document = documents[0]
+        return clean_rendered_html(
+            document.html,
+            document.source_url,
+            allow_plain_http,
+            maximum_html_bytes,
+        )
+
+    assembled_body = BeautifulSoup("", "html.parser")
+    for document in documents:
+        cleaned_document = BeautifulSoup(
+            clean_rendered_html(document.html, document.source_url, allow_plain_http, 0),
+            "html.parser",
+        )
+        section = assembled_body.new_tag("section")
+        for child in list(cleaned_document.body.contents):
+            section.append(child.extract())
+        assembled_body.append(section)
+
+    assembled_html = _serialize_document(assembled_body, "")
+    _enforce_output_limit(assembled_html, maximum_html_bytes)
+    return assembled_html
 
 
 def _document_title(document: BeautifulSoup) -> str:
@@ -120,3 +154,10 @@ def _serialize_document(source_body: Tag | BeautifulSoup, title: str) -> str:
     html.append(head)
     html.append(body)
     return f"<!doctype html>\n{html}"
+
+
+def _enforce_output_limit(cleaned_html: str, maximum_html_bytes: int) -> None:
+    """Reject a complete UTF-8 result that exceeds the configured aggregate cap."""
+
+    if maximum_html_bytes and len(cleaned_html.encode("utf-8")) > maximum_html_bytes:
+        raise BrowserAgentError("Clean HTML exceeds the configured UTF-8 byte limit.")

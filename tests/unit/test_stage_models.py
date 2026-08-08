@@ -10,11 +10,13 @@ from render_and_strip_mcp.stage_models import (
     ACCESS_COMPLETION_TOOL,
     COLLECTION_COMPLETION_TOOL,
     DISCOVERY_COMPLETION_TOOL,
+    PAGINATION_ADVANCE_COMPLETION_TOOL,
     RECONSTRUCTION_COMPLETION_TOOL,
     AccessCheckpoint,
     CollectionReport,
     CompletionTool,
     DiscoveryReport,
+    PaginationAdvanceReport,
     ReconstructionReport,
 )
 
@@ -34,11 +36,28 @@ def test_stage_reports_accept_valid_semantic_handoffs() -> None:
         verified=True, evidence=["The report heading is visible."]
     )
     collection = CollectionReport(complete=True, evidence=["No relevant controls remain."])
+    pagination = PaginationAdvanceReport(
+        status="advanced",
+        progress="Captured pages 1-2; releases remain newer than the requested cutoff.",
+        evidence=["Activated the enabled Next control and observed page 2."],
+    )
 
     assert checkpoint.reconstruction_instructions == ["Open the product report."]
     assert discovery.strategy == "retained-final-document"
     assert reconstruction.verified is True
     assert collection.complete is True
+    assert pagination.status == "advanced"
+
+
+def test_discovery_accepts_paginated_documents_strategy() -> None:
+    """Discovery can select proven replacing same-origin result pagination."""
+
+    report = DiscoveryReport(
+        strategy="paginated-documents",
+        evidence=["The enabled Next control replaced page 1 with same-origin page 2."],
+    )
+
+    assert report.strategy == "paginated-documents"
 
 
 @pytest.mark.parametrize(
@@ -50,6 +69,22 @@ def test_stage_reports_accept_valid_semantic_handoffs() -> None:
         (DiscoveryReport, {"strategy": "unknown", "evidence": []}),
         (ReconstructionReport, {"verified": True, "evidence": [" "]}),
         (CollectionReport, {"complete": True, "evidence": []}),
+        (
+            PaginationAdvanceReport,
+            {"status": "stopped", "progress": "At page 2.", "evidence": ["Terminal."]},
+        ),
+        (
+            PaginationAdvanceReport,
+            {"status": "complete", "progress": " ", "evidence": ["Terminal."]},
+        ),
+        (
+            PaginationAdvanceReport,
+            {"status": "complete", "progress": "At terminal page.", "evidence": []},
+        ),
+        (
+            PaginationAdvanceReport,
+            {"status": "complete", "progress": "x" * 4001, "evidence": ["Terminal."]},
+        ),
     ],
 )
 def test_stage_reports_reject_invalid_or_empty_semantic_data(
@@ -77,6 +112,7 @@ def test_completion_tool_translates_validation_failures_to_domain_error() -> Non
         DISCOVERY_COMPLETION_TOOL,
         RECONSTRUCTION_COMPLETION_TOOL,
         COLLECTION_COMPLETION_TOOL,
+        PAGINATION_ADVANCE_COMPLETION_TOOL,
     ],
 )
 def test_completion_tool_schemas_describe_every_report_field(

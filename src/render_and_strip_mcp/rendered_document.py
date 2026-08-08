@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from bs4 import BeautifulSoup
 from fastmcp import Client
 
@@ -41,6 +43,14 @@ VISIBLE_DOCUMENT_EXPRESSION = """() => {
   const documentClone = cloneVisibleNode(document.documentElement);
   return documentClone ? documentClone.outerHTML : '<html><head></head><body></body></html>';
 }"""
+
+
+@dataclass(frozen=True)
+class RenderedDocument:
+    """One visibility-filtered document captured with its top-level source URL."""
+
+    html: str
+    source_url: str
 
 
 async def fetch_visible_top_level_document(client: Client, timeout_seconds: float) -> str:
