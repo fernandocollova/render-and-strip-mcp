@@ -139,7 +139,7 @@ class ReconstructionReport(StageReport):
 
 
 class CollectionReport(StageReport):
-    """Outcome of exhausting the selected retained-document collection strategy. """
+    """Outcome of exhausting the selected retained-document collection strategy."""
 
     complete: bool = Field(
         description=(

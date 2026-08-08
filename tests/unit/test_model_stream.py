@@ -205,7 +205,5 @@ def test_stream_rejects_malformed_or_non_normal_completion(
 
     with pytest.raises(ModelStreamError, match=error_message):
         asyncio.run(
-            model_stream.stream_model_turn(
-                llm_settings(), catalog(), [], ignore_reasoning_fragment
-            )
+            model_stream.stream_model_turn(llm_settings(), catalog(), [], ignore_reasoning_fragment)
         )

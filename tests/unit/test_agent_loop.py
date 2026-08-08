@@ -236,9 +236,7 @@ def test_stage_prompts_define_page_retrieval_waiting_and_completion_contracts() 
             [],
             state,
         ),
-        "collection": CollectionStage("retained-final-document").build_messages(
-            "task", [], state
-        ),
+        "collection": CollectionStage("retained-final-document").build_messages("task", [], state),
         "pagination": PaginationAdvanceStage(1).build_messages("task", [], state),
     }
 
@@ -420,8 +418,6 @@ def test_stage_classes_own_their_matching_completion_tools() -> None:
     assert AccessStage().completion_tool is ACCESS_COMPLETION_TOOL
     assert DiscoveryStage().completion_tool is DISCOVERY_COMPLETION_TOOL
     assert ReconstructionStage(checkpoint).completion_tool is RECONSTRUCTION_COMPLETION_TOOL
-    assert (
-        CollectionStage("retained-final-document").completion_tool is COLLECTION_COMPLETION_TOOL
-    )
+    assert CollectionStage("retained-final-document").completion_tool is COLLECTION_COMPLETION_TOOL
     assert PaginationAdvanceStage(1).completion_tool is PAGINATION_ADVANCE_COMPLETION_TOOL
     assert not hasattr(ACCESS_COMPLETION_TOOL, "stage_name")

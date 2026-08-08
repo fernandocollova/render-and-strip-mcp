@@ -78,8 +78,7 @@ class StageRunner:
             await self.reasoning_progress.flush_if_needed()
             if model_turn.tool_call is None:
                 raise MissingStageCompletionError(
-                    f"The {stage.stage_name} stage stopped without its required "
-                    "completion tool."
+                    f"The {stage.stage_name} stage stopped without its required completion tool."
                 )
             if model_turn.tool_call.kind == "completion":
                 report = completion_tool.parse(model_turn.tool_call.arguments)
