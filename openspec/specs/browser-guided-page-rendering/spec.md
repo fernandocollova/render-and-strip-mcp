@@ -3,11 +3,19 @@
 Provide browser-agent-guided rendering of a page and return only its cleaned final HTML.
 ## Requirements
 ### Requirement: Render-and-strip MCP tool input and result
-The MCP server SHALL expose a Streamable HTTP tool named `render_and_strip_page` that accepts a non-empty HTTP(S) initial URL and non-empty natural-language browser task. It SHALL reject a plain-HTTP URL by default and accept it only when `allow_plain_http` is enabled. It SHALL always reject URL schemes other than HTTP(S). On success, the tool SHALL return only the cleaned HTML string produced after successful greedy retained-final-document collection. On failure, the tool SHALL return an MCP tool error and SHALL NOT return partial HTML.
+The MCP server SHALL expose a Streamable HTTP tool named `render_and_strip_page` that accepts a non-empty HTTP(S) initial URL and non-empty natural-language browser task. It SHALL reject a plain-HTTP URL by default and accept it only when `allow_plain_http` is enabled. It SHALL always reject URL schemes other than HTTP(S). On success, the tool SHALL return only one cleaned HTML string produced after successful collection through a supported strategy. For retained-document collection, that string SHALL represent the one final page document. For paginated-document collection, it SHALL contain the captured page documents assembled in source order. On failure, the tool SHALL return an MCP tool error and SHALL NOT return partial HTML.
+
+#### Scenario: Successful retained-document rendering
+- **WHEN** a caller invokes `render_and_strip_page` with a valid URL and task whose retained-document pipeline completes within its limits
+- **THEN** the tool returns only cleaned HTML from the greedily expanded final page state
 
 #### Scenario: Successful browser-guided rendering
-- **WHEN** a caller invokes `render_and_strip_page` with a valid URL and task whose access, discovery, reconstruction, and collection stages complete within their limits
-- **THEN** the tool returns only cleaned HTML from the greedily expanded final page state
+- **WHEN** a caller invokes `render_and_strip_page` with a valid URL and task whose selected supported collection pipeline completes within its limits
+- **THEN** the tool returns only the cleaned HTML produced by that completed collection strategy
+
+#### Scenario: Successful paginated rendering
+- **WHEN** a caller invokes `render_and_strip_page` with a valid URL and task whose paginated-document pipeline reaches semantic or natural completion within its limits
+- **THEN** the tool returns only one cleaned HTML document containing all captured page documents in source order
 
 #### Scenario: Invalid tool input
 - **WHEN** a caller supplies an empty URL or task, a non-HTTP(S) URL, or a plain-HTTP URL while `allow_plain_http` is disabled
@@ -132,14 +140,18 @@ The server SHALL track the tab used for initial navigation as the only page elig
 - **THEN** the server does not return the downloaded content and continues tracking the initial top-level page
 
 ### Requirement: Bounded agent execution
-The server SHALL enforce configurable inclusive per-stage limits for model turns and model-directed browser actions, plus configurable limits for total invocation time, per-navigation operation, other browser operations, each model request, optional post-action settle grace, and cleanup. The defaults SHALL be 12 model turns and 30 model-directed browser actions for each of access, discovery, reconstruction, and collection; 600 total seconds; 20 navigation seconds; 15 seconds for each other browser operation; 90 model-request seconds; 0 settle-grace seconds; and 10 cleanup seconds. A stage MAY submit valid local completion on its final permitted model turn. Subject to the model-turn allowance, it MAY execute exactly its configured browser-action maximum and SHALL reject an additional action before execution. If the final permitted model turn requests a browser action, the stage SHALL reject that action before execution because no turn remains for mandatory completion. Initial, reset, and model-directed navigation calls SHALL each use the navigation timeout. Other model-directed browser calls, orchestration tab operations, location evaluation, snapshots, and final extraction SHALL each independently use the browser-action timeout; these deadlines SHALL NOT form one composite action timeout. Total time SHALL begin when browser-agent invocation processing begins and include validation, every stage, reset, browser and model work, optional grace periods, extraction, and cleaning. Cleanup SHALL run once in a cancellation-shielded `finally` block and MAY extend execution only by its cleanup timeout.
+The server SHALL enforce configurable inclusive per-stage limits for model turns and model-directed browser actions for access, discovery, reconstruction, retained-document collection, and each pagination-advance iteration, plus a configurable positive hard paginated-document limit and the existing invocation-wide time and operation limits. The defaults SHALL be 12 model turns and 30 model-directed browser actions for each stage invocation; 25 captured paginated documents; 600 total seconds; 20 navigation seconds; 15 seconds for each other browser operation; 90 model-request seconds; 0 settle-grace seconds; and 10 cleanup seconds. The existing final-turn, browser-action, timeout, cleanup, and no-partial-output rules SHALL apply to every new stage invocation and document capture. Per-page stage limits SHALL reset for each pagination iteration, while the total timeout and paginated-document limit SHALL remain invocation-wide.
 
 #### Scenario: Browser action limit is exceeded
-- **WHEN** any model-guided stage requests more browser actions than the configured per-stage maximum
-- **THEN** the server terminates the invocation with an MCP tool error and does not return the current page
+- **WHEN** any model-guided stage invocation requests more browser actions than its configured maximum
+- **THEN** the server terminates the invocation with an MCP tool error and does not return collected pages
+
+#### Scenario: Paginated-document limit is exceeded
+- **WHEN** another potentially relevant result page remains after the configured number of documents has been captured
+- **THEN** the server terminates the invocation with an MCP tool error and does not return assembled or partial HTML
 
 #### Scenario: Stage completes on its final turn
-- **WHEN** a stage submits its valid local completion call on its final permitted model turn
+- **WHEN** a stage submits its valid completion report on its final permitted model turn
 - **THEN** the server accepts that completion without a model-turn limit error
 
 #### Scenario: Final turn requests another browser action
@@ -147,8 +159,8 @@ The server SHALL enforce configurable inclusive per-stage limits for model turns
 - **THEN** the server rejects the action before remote execution because mandatory stage completion can no longer occur within the turn allowance
 
 #### Scenario: Model completes within limits
-- **WHEN** every model-guided stage submits its valid completion report within its inclusive per-stage limits and before the total timeout expires
-- **THEN** the server proceeds to final-page extraction after collection completion
+- **WHEN** every required stage submits its valid completion report within its limits and before the total timeout expires
+- **THEN** the server proceeds to final document cleaning or assembly after collection completion
 
 #### Scenario: Browser-agent processing starts
 - **WHEN** a valid tool invocation begins browser-agent processing
@@ -165,3 +177,18 @@ The server SHALL enforce configurable inclusive per-stage limits for model turns
 #### Scenario: Cleanup is the only failure
 - **WHEN** processing succeeds but mandatory browser cleanup fails
 - **THEN** the outer tool returns an MCP cleanup error instead of HTML
+
+### Requirement: Paginated visible-document capture and assembly
+For paginated collection, the server SHALL capture every visibility-filtered top-level document while it is current and before the next-page action replaces it. After successful semantic or natural completion, it SHALL apply the semantic cleaning policy using each captured document's own top-level URL for link resolution and SHALL assemble the cleaned bodies into one valid HTML document in capture order. A single captured document SHALL preserve the existing cleaned output shape. The configured output-byte limit SHALL apply to the complete assembled UTF-8 result.
+
+#### Scenario: Relative links occur on multiple pages
+- **WHEN** captured page documents contain relative links and have different top-level page URLs
+- **THEN** each link is resolved against the URL of the document in which it appeared before assembly
+
+#### Scenario: Multiple cleaned documents are assembled
+- **WHEN** paginated collection captures more than one page and completes successfully
+- **THEN** the result is one valid HTML document containing each complete cleaned body in capture order
+
+#### Scenario: Assembled output exceeds the byte limit
+- **WHEN** the complete assembled UTF-8 HTML exceeds the configured output maximum
+- **THEN** the invocation fails without returning a smaller or partial document

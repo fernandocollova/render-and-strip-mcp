@@ -27,11 +27,11 @@ The service SHALL run a model-guided discovery stage from the data-ready state a
 - **WHEN** a plausibly relevant control has uncertain or potentially mutating effects and leaving it unused prevents discovery from establishing complete supported collection
 - **THEN** discovery does not activate it and reports `unknown`
 
-#### Scenario: Numbered or next-page navigation replaces the result document
+#### Scenario: Numbered pagination replaces the current document view
 - **WHEN** discovery establishes that an immediate next-page action replaces the current same-origin target-result document and that each page supports retained-document collection
 - **THEN** discovery selects `paginated-documents`
 
-#### Scenario: Discovery cannot establish supported behavior
+#### Scenario: Discovery cannot establish retained-document behavior
 - **WHEN** discovery observes or cannot rule out unsafe, virtualized, mixed, ambiguous, or otherwise unsupported behavior
 - **THEN** discovery reports `unknown`
 
@@ -60,6 +60,18 @@ Access, discovery, reconstruction, retained-document collection, and each pagina
 #### Scenario: Page-advance work exceeds a stage limit
 - **WHEN** one pagination-advance iteration requests work beyond an inclusive model-turn or browser-action maximum
 - **THEN** the invocation fails without assembled or partial HTML
+
+#### Scenario: One stage consumes its action allowance
+- **WHEN** a stage requests work beyond its inclusive model-turn or browser-action allowance
+- **THEN** the invocation fails even if another stage used fewer turns or actions
+
+#### Scenario: A new stage begins
+- **WHEN** the preceding stage completed within its limits
+- **THEN** the new stage receives fresh model-turn and browser-action counters without resetting the invocation-wide timeout or shared progress accounting
+
+#### Scenario: Collection begins after reconstruction
+- **WHEN** reconstruction verifies the access checkpoint and collection begins
+- **THEN** collection receives the original task, selected strategy, current page state, and a fresh action history without checkpoint fields or prior-stage evidence
 
 ## ADDED Requirements
 

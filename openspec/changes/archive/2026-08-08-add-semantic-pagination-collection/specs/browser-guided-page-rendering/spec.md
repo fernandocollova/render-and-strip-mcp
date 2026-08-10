@@ -7,6 +7,10 @@ The MCP server SHALL expose a Streamable HTTP tool named `render_and_strip_page`
 - **WHEN** a caller invokes `render_and_strip_page` with a valid URL and task whose retained-document pipeline completes within its limits
 - **THEN** the tool returns only cleaned HTML from the greedily expanded final page state
 
+#### Scenario: Successful browser-guided rendering
+- **WHEN** a caller invokes `render_and_strip_page` with a valid URL and task whose selected supported collection pipeline completes within its limits
+- **THEN** the tool returns only the cleaned HTML produced by that completed collection strategy
+
 #### Scenario: Successful paginated rendering
 - **WHEN** a caller invokes `render_and_strip_page` with a valid URL and task whose paginated-document pipeline reaches semantic or natural completion within its limits
 - **THEN** the tool returns only one cleaned HTML document containing all captured page documents in source order
