@@ -22,16 +22,17 @@ from .errors import (
     UnknownDiscoveryStrategyError,
     UnsuccessfulStageOutcomeError,
 )
-from .html_cleaner import clean_rendered_documents
+from .html_cleaner import normalize_captured_content
 from .mcp_results import extract_json_string_result, extract_text_result
 from .playwright_tools import PlaywrightSession, open_playwright_session
 from .reasoning_progress import ReasoningProgressReporter
-from .rendered_document import RenderedDocument, fetch_visible_top_level_document
+from .selected_content import CapturedContent, fetch_visible_selected_region
 from .stage_models import (
     AccessCheckpoint,
     CollectionStrategy,
     DiscoveryReport,
     ReconstructionReport,
+    SelectedRegion,
 )
 from .url_policy import Origin, UrlPolicy
 
@@ -194,35 +195,37 @@ class BrowserAgent:
         await self._report_operational_status("Collection")
         collection_handler = COLLECTION_STRATEGIES[collection_strategy]
 
-        async def capture_document() -> RenderedDocument:
-            return await self._capture_rendered_document(
+        async def capture_content(selected_region: SelectedRegion) -> CapturedContent:
+            return await self._capture_selected_content(
                 session.client,
                 original_tab_index,
                 initial_origin,
+                selected_region,
             )
 
-        captured_documents = await collection_handler(
+        captured_content = await collection_handler(
             stage_runner,
             task,
             reconstruction_result.page_state,
-            capture_document,
+            capture_content,
             self._settings.agent.max_paginated_documents,
         )
 
         await self._report_operational_status("Final extraction and cleaning")
-        return clean_rendered_documents(
-            captured_documents,
+        return normalize_captured_content(
+            captured_content,
             self._settings.agent.allow_plain_http,
             self._settings.output.max_html_bytes,
         )
 
-    async def _capture_rendered_document(
+    async def _capture_selected_content(
         self,
         client: Client,
         original_tab_index: int,
         initial_origin: Origin,
-    ) -> RenderedDocument:
-        """Capture the current visibility-filtered document before later actions can replace it."""
+        selected_region: SelectedRegion,
+    ) -> CapturedContent:
+        """Capture the selected current region before later actions can replace it."""
 
         await select_original_tab(
             client,
@@ -235,15 +238,14 @@ class BrowserAgent:
         )
         try:
             async with asyncio.timeout(self._settings.agent.browser_action_timeout_seconds):
-                document_html = await fetch_visible_top_level_document(
+                region_html = await fetch_visible_selected_region(
                     client,
+                    selected_region,
                     self._settings.agent.browser_action_timeout_seconds,
                 )
         except TimeoutError as error:
-            raise ExecutionLimitError(
-                "Rendered document extraction time limit exceeded."
-            ) from error
-        return RenderedDocument(document_html, source_url)
+            raise ExecutionLimitError("Selected content extraction time limit exceeded.") from error
+        return CapturedContent(region_html, source_url)
 
     async def _execute_browser_action(
         self,

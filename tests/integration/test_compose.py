@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from urllib.parse import urljoin
 from urllib.request import urlopen
 
@@ -15,10 +16,11 @@ from render_and_strip_mcp.browser_tabs import (
     list_browser_tabs,
     select_original_tab,
 )
-from render_and_strip_mcp.html_cleaner import clean_rendered_html
+from render_and_strip_mcp.html_cleaner import clean_selected_region
 from render_and_strip_mcp.mcp_results import extract_json_string_result, extract_text_result
 from render_and_strip_mcp.playwright_tools import open_playwright_session
-from render_and_strip_mcp.rendered_document import fetch_visible_top_level_document
+from render_and_strip_mcp.selected_content import fetch_visible_selected_region
+from render_and_strip_mcp.stage_models import SelectedRegion
 
 
 @pytest.mark.integration
@@ -73,8 +75,20 @@ def test_compose_playwright_session_renders_and_cleans_fixture(
                     timeout=5,
                 )
                 assert extract_json_string_result(location_result) == compose_fixture_url
-                document_html = await fetch_visible_top_level_document(session.client, 5)
-                return clean_rendered_html(document_html, compose_fixture_url, True, 0)
+                snapshot = extract_text_result(
+                    await session.client.call_tool("browser_snapshot", {}, timeout=5)
+                )
+                main_target = re.search(r"main \[ref=([^\]]+)\]", snapshot)
+                assert main_target is not None
+                region_html = await fetch_visible_selected_region(
+                    session.client,
+                    SelectedRegion(
+                        element="Deterministic fixture main content",
+                        target=main_target.group(1),
+                    ),
+                    5,
+                )
+                return clean_selected_region(region_html, compose_fixture_url, True)
             finally:
                 close_result = await session.client.call_tool("browser_close", {}, timeout=5)
                 extract_text_result(close_result)
@@ -82,8 +96,10 @@ def test_compose_playwright_session_renders_and_cleans_fixture(
     cleaned_html = asyncio.run(exercise())
 
     assert "Deterministic fixture page" in cleaned_html
-    assert "Fixture chrome" in cleaned_html
-    assert "Fixture footer" in cleaned_html
+    assert "Fixture chrome" not in cleaned_html
+    assert "Fixture navigation" not in cleaned_html
+    assert "Fixture sidebar" not in cleaned_html
+    assert "Fixture footer" not in cleaned_html
     assert f'href="{urljoin(compose_fixture_url, "details.html")}"' in cleaned_html
 
 
@@ -119,18 +135,28 @@ def test_compose_fresh_snapshots_observe_retained_lazy_content(
                 )
                 extract_text_result(wait_result)
                 after_snapshot = await session.client.call_tool("browser_snapshot", {}, timeout=5)
-                document_html = await fetch_visible_top_level_document(session.client, 5)
+                after_snapshot_text = extract_text_result(after_snapshot)
+                main_target = re.search(r"main \[ref=([^\]]+)\]", after_snapshot_text)
+                assert main_target is not None
+                region_html = await fetch_visible_selected_region(
+                    session.client,
+                    SelectedRegion(
+                        element="Greedy fixture main content",
+                        target=main_target.group(1),
+                    ),
+                    5,
+                )
                 return (
                     extract_text_result(before_snapshot),
-                    extract_text_result(after_snapshot),
-                    document_html,
+                    after_snapshot_text,
+                    region_html,
                 )
             finally:
                 close_result = await session.client.call_tool("browser_close", {}, timeout=5)
                 extract_text_result(close_result)
 
-    before_snapshot, after_snapshot, document_html = asyncio.run(exercise())
+    before_snapshot, after_snapshot, region_html = asyncio.run(exercise())
 
     assert "Lazy retained item." not in before_snapshot
     assert "Lazy retained item." in after_snapshot
-    assert "Lazy retained item." in document_html
+    assert "Lazy retained item." in region_html

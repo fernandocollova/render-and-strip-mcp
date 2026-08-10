@@ -1,4 +1,4 @@
-"""Deterministic semantic cleanup of a rendered top-level HTML document."""
+"""Source-aware semantic cleanup and uniform assembly of selected content."""
 
 from __future__ import annotations
 
@@ -7,80 +7,52 @@ from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 from .errors import BrowserAgentError
 from .html_elements import ALLOWED_TAGS, REMOVED_TAGS
 from .link_destination import sanitize_link_destination
-from .rendered_document import RenderedDocument
+from .selected_content import CapturedContent
 
 
-def clean_rendered_html(
-    document_html: str,
-    final_url: str,
+def clean_selected_region(
+    region_html: str,
+    source_url: str,
     allow_plain_http: bool,
-    maximum_html_bytes: int,
 ) -> str:
-    """Return a complete semantic document or fail when the configured output cap is exceeded."""
+    """Independently normalize one selected region against its source URL."""
 
-    source_document = BeautifulSoup(document_html, "html.parser")
-    document_title = _document_title(source_document)
-    for comment in source_document.find_all(string=lambda value: isinstance(value, Comment)):
+    source_region = BeautifulSoup(region_html, "html.parser")
+    for comment in source_region.find_all(string=lambda value: isinstance(value, Comment)):
         comment.extract()
-    for image in source_document.find_all("img"):
+    for image in source_region.find_all("img"):
         alternative_text = image.get("alt")
         if isinstance(alternative_text, str) and alternative_text.strip():
             image.replace_with(NavigableString(f"[Image: {alternative_text.strip()}]"))
         else:
             image.decompose()
-    if source_document.head is not None:
-        source_document.head.decompose()
-    source_body = source_document.body or source_document
-    _remove_nontext_content(source_body)
-    _clean_semantic_tags(source_body, final_url, allow_plain_http)
-    cleaned_html = _serialize_document(source_body, document_title)
-    _enforce_output_limit(cleaned_html, maximum_html_bytes)
-    return cleaned_html
+    _remove_nontext_content(source_region)
+    _clean_semantic_tags(source_region, source_url, allow_plain_http)
+    return _serialize_document(source_region)
 
 
-def clean_rendered_documents(
-    documents: list[RenderedDocument],
+def normalize_captured_content(
+    captured_content: list[CapturedContent],
     allow_plain_http: bool,
     maximum_html_bytes: int,
 ) -> str:
-    """Clean source-aware documents and assemble multiple bodies in capture order."""
+    """Clean and assemble all selected regions under one main in capture order."""
 
-    if not documents:
-        raise BrowserAgentError("Collection completed without a rendered document.")
-    if len(documents) == 1:
-        document = documents[0]
-        return clean_rendered_html(
-            document.html,
-            document.source_url,
-            allow_plain_http,
-            maximum_html_bytes,
-        )
+    if not captured_content:
+        raise BrowserAgentError("Collection completed without captured content.")
 
-    assembled_body = BeautifulSoup("", "html.parser")
-    for document in documents:
-        cleaned_document = BeautifulSoup(
-            clean_rendered_html(document.html, document.source_url, allow_plain_http, 0),
+    assembled_content = BeautifulSoup("", "html.parser")
+    for capture in captured_content:
+        cleaned_region = BeautifulSoup(
+            clean_selected_region(capture.html, capture.source_url, allow_plain_http),
             "html.parser",
         )
-        section = assembled_body.new_tag("section")
-        for child in list(cleaned_document.body.contents):
-            section.append(child.extract())
-        assembled_body.append(section)
+        for child in list(cleaned_region.main.contents):
+            assembled_content.append(child.extract())
 
-    assembled_html = _serialize_document(assembled_body, "")
+    assembled_html = _serialize_document(assembled_content)
     _enforce_output_limit(assembled_html, maximum_html_bytes)
     return assembled_html
-
-
-def _document_title(document: BeautifulSoup) -> str:
-    """Extract a textual input title before the source head is removed."""
-
-    if document.head is None:
-        return ""
-    title_tag = document.head.find("title", recursive=False)
-    if title_tag is None:
-        return ""
-    return title_tag.get_text(" ", strip=True)
 
 
 def _remove_nontext_content(source_body: Tag | BeautifulSoup) -> None:
@@ -98,7 +70,7 @@ def _clean_semantic_tags(
     """Unwrap layout markup and reduce retained semantic elements to allowed attributes."""
 
     for tag in list(source_body.find_all(True)):
-        if tag.name not in ALLOWED_TAGS:
+        if tag.name == "main" or tag.name not in ALLOWED_TAGS:
             tag.unwrap()
             continue
         _clean_attributes(tag, final_url, allow_plain_http)
@@ -136,21 +108,19 @@ def _copy_string_attribute(tag: Tag, target: dict[str, str], attribute_name: str
         target[attribute_name] = value
 
 
-def _serialize_document(source_body: Tag | BeautifulSoup, title: str) -> str:
-    """Serialize the fixed UTF-8 HTML skeleton with cleaned top-level body content."""
+def _serialize_document(source_content: Tag | BeautifulSoup) -> str:
+    """Serialize the fixed UTF-8 HTML skeleton with one application-owned main."""
 
     output_document = BeautifulSoup("", "html.parser")
     html = output_document.new_tag("html")
     head = output_document.new_tag("head")
     meta = output_document.new_tag("meta", charset="utf-8")
     head.append(meta)
-    if title:
-        title_tag = output_document.new_tag("title")
-        title_tag.string = title
-        head.append(title_tag)
     body = output_document.new_tag("body")
-    for child in list(source_body.contents):
-        body.append(child.extract())
+    main = output_document.new_tag("main")
+    for child in list(source_content.contents):
+        main.append(child.extract())
+    body.append(main)
     html.append(head)
     html.append(body)
     return f"<!doctype html>\n{html}"

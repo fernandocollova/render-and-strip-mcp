@@ -289,8 +289,13 @@ class CollectionStage(Stage):
         "including scrolling, lazy loading, additive controls, and expansions that can remain open "
         "simultaneously. Use semantic waits for visibly pending effects. Preserve earlier target "
         "content and make a final verification sweep for no new content, unused relevant controls, "
-        "pending state, or lost content. Complete only by calling complete_collection with "
-        "complete and evidence."
+        "pending state, or lost content. From the final newest fresh browser observation, select "
+        "exactly one current contiguous element containing all content relevant to the caller's "
+        "task. Exclude surrounding page-level header, navigation, sidebar, search, and footer "
+        "chrome from the selected boundary; do not select the full body as a fallback. Complete "
+        "only by calling complete_collection with complete, evidence, selected_region_element as "
+        "a human-readable description, and selected_region_target as the exact current Playwright "
+        "snapshot reference."
     )
     completion_tool = COLLECTION_COMPLETION_TOOL
     include_preceding_state = True
@@ -305,7 +310,7 @@ class CollectionStage(Stage):
 class PaginationAdvanceStage(Stage):
     """Assess semantic completion or advance exactly one result page."""
 
-    captured_document_count: int
+    captured_region_count: int
     progress: str = ""
 
     stage_name = "pagination-advance"
@@ -313,8 +318,9 @@ class PaginationAdvanceStage(Stage):
         "Assess whether pagination should stop at the current result page or advance exactly one "
         "result page for the original task. Interpret semantic cutoffs from the task without "
         "inventing site-, date-, or record-specific parsing. Complete when established ordering "
-        "proves later pages cannot satisfy the task, preserving this whole boundary page, or when "
-        "no enabled immediate next-page control remains. If the task has no explicit cutoff, "
+        "proves later pages cannot satisfy the task, preserving this boundary page's whole "
+        "selected region, or when no enabled immediate next-page control remains. If the task has "
+        "no explicit cutoff, "
         "continue to the natural terminal page. If ordering, cutoff satisfaction, or later-page "
         "relevance is uncertain, continue. To continue, activate exactly one enabled immediate "
         "Next or numbered next-page control and verify that it replaced the result document. Never "
@@ -332,7 +338,7 @@ class PaginationAdvanceStage(Stage):
 
         prior_progress = self.progress or "(no prior pagination progress)"
         return [
-            f"Captured document count:\n{self.captured_document_count}",
+            f"Captured region count:\n{self.captured_region_count}",
             f"Prior compact pagination progress:\n{prior_progress}",
         ]
 

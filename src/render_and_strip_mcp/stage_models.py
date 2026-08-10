@@ -138,6 +138,14 @@ class ReconstructionReport(StageReport):
         return values
 
 
+@dataclass(frozen=True)
+class SelectedRegion:
+    """Typed handoff for one validated current task-content element."""
+
+    element: str
+    target: str
+
+
 class CollectionReport(StageReport):
     """Outcome of exhausting the selected retained-document collection strategy."""
 
@@ -151,6 +159,28 @@ class CollectionReport(StageReport):
         min_length=1,
         description="List observations supporting the collection-completeness result.",
     )
+    selected_region_element: str = Field(
+        min_length=1,
+        description=(
+            "Human-readable description of the one contiguous element containing all content "
+            "relevant to the caller task and excluding surrounding page-level chrome."
+        ),
+    )
+    selected_region_target: str = Field(
+        min_length=1,
+        description=(
+            "Exact Playwright target reference for that element from the newest fresh browser "
+            "observation."
+        ),
+    )
+
+    @field_validator("selected_region_element", "selected_region_target")
+    @classmethod
+    def validate_selection_text(cls, value: str, info: object) -> str:
+        """Reject blank element descriptions and snapshot targets."""
+
+        _require_semantic_text(value, getattr(info, "field_name", "selected region"))
+        return value
 
     @field_validator("evidence")
     @classmethod
@@ -160,6 +190,12 @@ class CollectionReport(StageReport):
         for value in values:
             _require_semantic_text(value, "evidence")
         return values
+
+    @property
+    def selected_region(self) -> SelectedRegion:
+        """Expose the two validated flat completion fields as one concrete handoff."""
+
+        return SelectedRegion(self.selected_region_element, self.selected_region_target)
 
 
 class PaginationAdvanceReport(StageReport):

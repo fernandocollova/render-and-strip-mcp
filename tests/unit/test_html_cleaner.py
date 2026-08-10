@@ -6,53 +6,44 @@ import pytest
 from bs4 import BeautifulSoup
 
 from render_and_strip_mcp.errors import BrowserAgentError
-from render_and_strip_mcp.html_cleaner import clean_rendered_html
-from render_and_strip_mcp.rendered_document import VISIBLE_DOCUMENT_EXPRESSION
+from render_and_strip_mcp.html_cleaner import clean_selected_region, normalize_captured_content
+from render_and_strip_mcp.selected_content import CapturedContent
 
 
 def clean(source: str, *, allow_plain_http: bool = False, maximum_html_bytes: int = 0) -> str:
     """Clean source HTML against one stable final page URL."""
 
-    return clean_rendered_html(
-        source,
-        "https://example.test/path/page",
-        allow_plain_http,
-        maximum_html_bytes,
-    )
+    source_url = "https://example.test/path/page"
+    if maximum_html_bytes:
+        return normalize_captured_content(
+            [CapturedContent(source, source_url)],
+            allow_plain_http,
+            maximum_html_bytes,
+        )
+    return clean_selected_region(source, source_url, allow_plain_http)
 
 
-def test_cleaner_preserves_semantics_and_visible_page_regions() -> None:
-    """Allowed visible semantics and landmarks survive without source attributes."""
+def test_cleaner_preserves_selected_region_semantics() -> None:
+    """Allowed semantics inside the selected boundary survive without source attributes."""
 
     result = clean(
         """
-<html><head><title> Example title </title><style>.x { color: red }</style></head>
-<body><header class="global">Global header</header><nav id="navigation">Navigation</nav>
-<aside data-content="supplemental">Aside</aside><div role="contentinfo">Role landmark</div>
 <main class="layout"><header>Inside header</header><article id="content">
 <h1 onclick="bad()">Heading</h1>
 <p style="color:red">Paragraph <strong>text</strong>.</p><table><tr><th scope="col">A</th>
 <td colspan="2" rowspan="1" data-value="x">B</td></tr></table>
 <time datetime="2026-01-01">Today</time>
 <abbr title="HyperText Markup Language">HTML</abbr></article><footer>Inside footer</footer></main>
-<footer class="global">Global footer</footer><script>alert(1)</script>
-</body></html>
 """
     )
     document = BeautifulSoup(result, "html.parser")
 
     assert result.startswith("<!doctype html>\n<html>")
-    assert document.title is not None and document.title.string == "Example title"
-    assert "Global header" in result
-    assert "Navigation" in result
-    assert "Aside" in result
-    assert "Role landmark" in result
-    assert "Global footer" in result
+    assert document.title is None
+    assert len(document.find_all("main")) == 1
     assert "Inside header" in result
     assert "Inside footer" in result
     assert document.header is not None and document.header.attrs == {}
-    assert document.nav is not None and document.nav.attrs == {}
-    assert document.aside is not None and document.aside.attrs == {}
     assert document.footer is not None and document.footer.attrs == {}
     assert document.find("div") is None
     assert document.h1 is not None and document.h1.attrs == {}
@@ -191,23 +182,3 @@ def test_cleaner_handles_malformed_fragment_and_rejects_output_overage() -> None
     assert "<p>Unclosed</p>" in result
     with pytest.raises(BrowserAgentError, match="byte limit"):
         clean("<html><body><p>Long document</p></body></html>", maximum_html_bytes=10)
-
-
-def test_visibility_expression_contains_all_documented_predicates() -> None:
-    """The pinned browser expression filters only the requested top-level hidden conditions."""
-
-    for required_fragment in (
-        "document.documentElement",
-        "element.hidden",
-        "aria-hidden",
-        "TEMPLATE",
-        "inert",
-        "display === 'none'",
-        "visibility === 'hidden'",
-        "visibility === 'collapse'",
-        "contentVisibility === 'hidden'",
-        "style.opacity",
-        "DETAILS",
-    ):
-        assert required_fragment in VISIBLE_DOCUMENT_EXPRESSION
-    assert "shadowRoot" not in VISIBLE_DOCUMENT_EXPRESSION

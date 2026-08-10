@@ -12,7 +12,11 @@ from render_and_strip_mcp.errors import (
     StageToolCollisionError,
     ToolSchemaError,
 )
-from render_and_strip_mcp.stage_models import ACCESS_COMPLETION_TOOL
+from render_and_strip_mcp.stage_models import (
+    ACCESS_COMPLETION_TOOL,
+    CompletionTool,
+    StageReport,
+)
 
 
 def discovered_tools() -> list[Tool]:
@@ -122,6 +126,21 @@ def test_catalog_rejects_nonportable_schema_keywords() -> None:
 
     with pytest.raises(ToolSchemaError, match="oneOf"):
         playwright_tools.build_tool_catalog(tools)
+
+
+def test_catalog_rejects_nonportable_local_completion_schema() -> None:
+    """Local and remote tools obey the same model-facing portable schema subset."""
+
+    class NestedPayload(StageReport):
+        value: str
+
+    class NestedCompletionReport(StageReport):
+        payload: NestedPayload
+
+    catalog = playwright_tools.build_tool_catalog(discovered_tools())
+
+    with pytest.raises(ToolSchemaError, match=r"\$ref"):
+        catalog.with_completion_tool(CompletionTool("complete_nested", NestedCompletionReport))
 
 
 def test_open_session_uses_discovered_tools_without_capability_prevalidation(

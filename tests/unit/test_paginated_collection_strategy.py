@@ -16,8 +16,12 @@ from render_and_strip_mcp.errors import (
     UnsuccessfulStageOutcomeError,
 )
 from render_and_strip_mcp.playwright_tools import ToolCatalog
-from render_and_strip_mcp.rendered_document import RenderedDocument
-from render_and_strip_mcp.stage_models import CollectionReport, PaginationAdvanceReport
+from render_and_strip_mcp.selected_content import CapturedContent
+from render_and_strip_mcp.stage_models import (
+    CollectionReport,
+    PaginationAdvanceReport,
+    SelectedRegion,
+)
 
 
 class UnusedProgressReporter:
@@ -49,12 +53,23 @@ def stage_runner() -> StageRunner:
     )
 
 
-def captured_document(page_number: int) -> RenderedDocument:
-    """Create one source-aware rendered document for strategy tests."""
+def captured_content(page_number: int) -> CapturedContent:
+    """Create one source-aware selected region for strategy tests."""
 
-    return RenderedDocument(
-        html=f"<html><body>Page {page_number}</body></html>",
+    return CapturedContent(
+        html=f"<main>Page {page_number}</main>",
         source_url=f"https://example.test/results?page={page_number}",
+    )
+
+
+def collection_report(page_state: PageState, *, complete: bool = True) -> CollectionReport:
+    """Build a collection report targeting the current page's results region."""
+
+    return CollectionReport(
+        complete=complete,
+        evidence=["Page retained." if complete else "A retained reveal remains."],
+        selected_region_element="Results region",
+        selected_region_target=f"results-{page_state.current_url[-1]}",
     )
 
 
@@ -78,12 +93,10 @@ def test_pagination_collects_each_page_before_advancing_and_carries_progress(
         if isinstance(stage, CollectionStage):
             assert stage.strategy == "retained-final-document"
             events.append(f"collect:{initial_state.observation}")
-            return StageRunResult(
-                CollectionReport(complete=True, evidence=["Page retained."]), initial_state
-            )
+            return StageRunResult(collection_report(initial_state), initial_state)
 
-        events.append(f"advance:{stage.captured_document_count}")
-        if stage.captured_document_count == 1:
+        events.append(f"advance:{stage.captured_region_count}")
+        if stage.captured_region_count == 1:
             assert stage.progress == ""
             return StageRunResult(
                 PaginationAdvanceReport(
@@ -103,12 +116,13 @@ def test_pagination_collects_each_page_before_advancing_and_carries_progress(
             initial_state,
         )
 
-    documents = iter([captured_document(1), captured_document(2)])
+    captures = iter([captured_content(1), captured_content(2)])
 
-    async def capture() -> RenderedDocument:
-        document = next(documents)
-        events.append(f"capture:{document.source_url[-1]}")
-        return document
+    async def capture(selected_region: SelectedRegion) -> CapturedContent:
+        capture = next(captures)
+        assert selected_region.target == f"results-{capture.source_url[-1]}"
+        events.append(f"capture:{capture.source_url[-1]}")
+        return capture
 
     monkeypatch.setattr(StageRunner, "run", run_stage)
 
@@ -122,7 +136,7 @@ def test_pagination_collects_each_page_before_advancing_and_carries_progress(
         )
     )
 
-    assert result == [captured_document(1), captured_document(2)]
+    assert result == [captured_content(1), captured_content(2)]
     assert events == [
         "collect:Page 1 snapshot",
         "capture:1",
@@ -150,14 +164,15 @@ def test_pagination_does_not_capture_or_advance_an_incomplete_page(
         del self, task
         assert isinstance(stage, CollectionStage)
         return StageRunResult(
-            CollectionReport(complete=False, evidence=["A retained reveal remains."]),
+            collection_report(initial_state, complete=False),
             initial_state,
         )
 
-    async def capture() -> RenderedDocument:
+    async def capture(selected_region: SelectedRegion) -> CapturedContent:
         nonlocal captured
+        del selected_region
         captured = True
-        return captured_document(1)
+        return captured_content(1)
 
     monkeypatch.setattr(StageRunner, "run", run_stage)
 
@@ -190,9 +205,7 @@ def test_pagination_rejects_completion_after_a_browser_action(
     ) -> StageRunResult:
         del self, task
         if isinstance(stage, CollectionStage):
-            return StageRunResult(
-                CollectionReport(complete=True, evidence=["Page retained."]), initial_state
-            )
+            return StageRunResult(collection_report(initial_state), initial_state)
         return StageRunResult(
             PaginationAdvanceReport(
                 status="complete",
@@ -203,8 +216,9 @@ def test_pagination_rejects_completion_after_a_browser_action(
             browser_action_count=1,
         )
 
-    async def capture() -> RenderedDocument:
-        return captured_document(1)
+    async def capture(selected_region: SelectedRegion) -> CapturedContent:
+        del selected_region
+        return captured_content(1)
 
     monkeypatch.setattr(StageRunner, "run", run_stage)
 
@@ -235,13 +249,11 @@ def test_pagination_rejects_unchanged_and_repeated_page_states(
     ) -> StageRunResult:
         del self, task
         if isinstance(stage, CollectionStage):
-            return StageRunResult(
-                CollectionReport(complete=True, evidence=["Page retained."]), initial_state
-            )
+            return StageRunResult(collection_report(initial_state), initial_state)
         return StageRunResult(
             PaginationAdvanceReport(
                 status="advanced",
-                progress=f"Assessed {stage.captured_document_count} pages.",
+                progress=f"Assessed {stage.captured_region_count} pages.",
                 evidence=["An immediate Next control appeared enabled."],
             ),
             next(advance_states),
@@ -249,10 +261,11 @@ def test_pagination_rejects_unchanged_and_repeated_page_states(
 
     capture_count = 0
 
-    async def capture() -> RenderedDocument:
+    async def capture(selected_region: SelectedRegion) -> CapturedContent:
         nonlocal capture_count
+        del selected_region
         capture_count += 1
-        return captured_document(capture_count)
+        return captured_content(capture_count)
 
     monkeypatch.setattr(StageRunner, "run", run_stage)
 
@@ -284,9 +297,7 @@ def test_pagination_assesses_completion_at_the_document_limit(
     ) -> StageRunResult:
         del self, task
         if isinstance(stage, CollectionStage):
-            return StageRunResult(
-                CollectionReport(complete=True, evidence=["Page retained."]), initial_state
-            )
+            return StageRunResult(collection_report(initial_state), initial_state)
         return StageRunResult(
             PaginationAdvanceReport(
                 status=status,  # type: ignore[arg-type]
@@ -296,8 +307,9 @@ def test_pagination_assesses_completion_at_the_document_limit(
             page_two,
         )
 
-    async def capture() -> RenderedDocument:
-        return captured_document(1)
+    async def capture(selected_region: SelectedRegion) -> CapturedContent:
+        del selected_region
+        return captured_content(1)
 
     monkeypatch.setattr(StageRunner, "run", run_stage)
     collection = collect_paginated_documents(
@@ -305,7 +317,7 @@ def test_pagination_assesses_completion_at_the_document_limit(
     )
 
     if status == "complete":
-        assert asyncio.run(collection) == [captured_document(1)]
+        assert asyncio.run(collection) == [captured_content(1)]
     else:
         with pytest.raises(ExecutionLimitError, match="limit reached before collection completion"):
             asyncio.run(collection)

@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from render_and_strip_mcp.errors import MalformedStageCompletionError
+from render_and_strip_mcp.playwright_tools import validate_input_schema
 from render_and_strip_mcp.stage_models import (
     ACCESS_COMPLETION_TOOL,
     COLLECTION_COMPLETION_TOOL,
@@ -35,7 +36,12 @@ def test_stage_reports_accept_valid_semantic_handoffs() -> None:
     reconstruction = ReconstructionReport(
         verified=True, evidence=["The report heading is visible."]
     )
-    collection = CollectionReport(complete=True, evidence=["No relevant controls remain."])
+    collection = CollectionReport(
+        complete=True,
+        evidence=["No relevant controls remain."],
+        selected_region_element="Release list",
+        selected_region_target="e42",
+    )
     pagination = PaginationAdvanceReport(
         status="advanced",
         progress="Captured pages 1-2; releases remain newer than the requested cutoff.",
@@ -46,6 +52,7 @@ def test_stage_reports_accept_valid_semantic_handoffs() -> None:
     assert discovery.strategy == "retained-final-document"
     assert reconstruction.verified is True
     assert collection.complete is True
+    assert collection.selected_region.target == "e42"
     assert pagination.status == "advanced"
 
 
@@ -68,7 +75,34 @@ def test_discovery_accepts_paginated_documents_strategy() -> None:
         (DiscoveryReport, {"strategy": "other", "evidence": ["Observed."]}),
         (DiscoveryReport, {"strategy": "unknown", "evidence": []}),
         (ReconstructionReport, {"verified": True, "evidence": [" "]}),
-        (CollectionReport, {"complete": True, "evidence": []}),
+        (
+            CollectionReport,
+            {
+                "complete": True,
+                "evidence": [],
+                "selected_region_element": "Report",
+                "selected_region_target": "e42",
+            },
+        ),
+        (
+            CollectionReport,
+            {
+                "complete": True,
+                "evidence": ["Complete."],
+                "selected_region_element": " ",
+                "selected_region_target": "e42",
+            },
+        ),
+        (
+            CollectionReport,
+            {
+                "complete": True,
+                "evidence": ["Complete."],
+                "selected_region_element": "Report",
+                "selected_region_target": " ",
+            },
+        ),
+        (CollectionReport, {"complete": True, "evidence": ["Complete."]}),
         (
             PaginationAdvanceReport,
             {"status": "stopped", "progress": "At page 2.", "evidence": ["Terminal."]},
@@ -130,3 +164,22 @@ def test_completion_tool_schemas_describe_every_report_field(
         assert isinstance(property_schema, dict)
         description = property_schema.get("description")
         assert isinstance(description, str) and description.strip()
+    validate_input_schema(completion_tool.name, parameters)
+
+
+def test_collection_completion_schema_is_flat() -> None:
+    """The model-facing collection contract contains no reference-based nested schema."""
+
+    function = COLLECTION_COMPLETION_TOOL.openai_schema["function"]
+    assert isinstance(function, dict)
+    parameters = function["parameters"]
+    assert isinstance(parameters, dict)
+
+    assert "$defs" not in parameters
+    assert "$ref" not in repr(parameters)
+    assert parameters["required"] == [
+        "complete",
+        "evidence",
+        "selected_region_element",
+        "selected_region_target",
+    ]

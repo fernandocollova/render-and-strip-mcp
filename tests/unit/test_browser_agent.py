@@ -16,11 +16,12 @@ from render_and_strip_mcp.agent_loop import StageRunner, StageRunResult
 from render_and_strip_mcp.config import Settings
 from render_and_strip_mcp.errors import BrowserAgentError
 from render_and_strip_mcp.playwright_tools import PlaywrightSession, ToolCatalog
-from render_and_strip_mcp.rendered_document import RenderedDocument
+from render_and_strip_mcp.selected_content import CapturedContent
 from render_and_strip_mcp.stage_models import (
     AccessCheckpoint,
     DiscoveryReport,
     ReconstructionReport,
+    SelectedRegion,
 )
 
 
@@ -66,7 +67,7 @@ class FakeBrowserClient:
         self._action_completed = False
         self._original_tab_selected = False
         self._cleanup_error = cleanup_error
-        self._document_html = iter(document_html or ["<html><head></head><body>Done</body></html>"])
+        self._document_html = iter(document_html or ["<main>Done</main>"])
 
     async def call_tool(
         self,
@@ -181,14 +182,14 @@ def install_successful_pipeline(
         stage_runner: StageRunner,
         task: str,
         initial_state: PageState,
-        capture_document: object,
+        capture_content: object,
         max_paginated_documents: int,
-    ) -> list[RenderedDocument]:
+    ) -> list[CapturedContent]:
         del stage_runner, task, initial_state
-        assert callable(capture_document)
+        assert callable(capture_content)
         assert max_paginated_documents == 25
         pipeline_events.append("collection")
-        return [await capture_document()]
+        return [await capture_content(SelectedRegion(element="Report content", target="e42"))]
 
     monkeypatch.setattr(browser_agent_module.StageRunner, "run", fake_run_stage)
     monkeypatch.setitem(
@@ -215,7 +216,7 @@ def test_agent_runs_stages_in_order_and_extracts_once_after_collection(
         ).run("https://example.test/", "clean")
     )
 
-    assert "<body>Done</body>" in final_html
+    assert "<body><main>Done</main></body>" in final_html
     assert pipeline_events == ["access", "discovery", "reconstruction", "collection"]
     assert [tool_name for tool_name, _ in client.calls].count("browser_evaluate") == 5
     assert client.calls[-1] == ("browser_close", {})
@@ -231,8 +232,8 @@ def test_agent_dispatches_paginated_collection_and_assembles_captured_documents(
     client = FakeBrowserClient(
         ["https://example.test/start"] * 3 + [page_one_url, page_two_url],
         document_html=[
-            "<html><body><p>First page</p></body></html>",
-            "<html><body><p>Second page</p></body></html>",
+            "<article><p>First page</p></article>",
+            "<article><p>Second page</p></article>",
         ],
     )
     install_fake_session(monkeypatch, client)
@@ -267,13 +268,16 @@ def test_agent_dispatches_paginated_collection_and_assembles_captured_documents(
         stage_runner: StageRunner,
         task: str,
         initial_state: PageState,
-        capture_document: object,
+        capture_content: object,
         max_paginated_documents: int,
-    ) -> list[RenderedDocument]:
+    ) -> list[CapturedContent]:
         del stage_runner, task, initial_state
-        assert callable(capture_document)
+        assert callable(capture_content)
         assert max_paginated_documents == 7
-        return [await capture_document(), await capture_document()]
+        return [
+            await capture_content(SelectedRegion(element="Page 1 results", target="e1")),
+            await capture_content(SelectedRegion(element="Page 2 results", target="e2")),
+        ]
 
     monkeypatch.setattr(browser_agent_module.StageRunner, "run", fake_run_stage)
     monkeypatch.setitem(
@@ -290,7 +294,8 @@ def test_agent_dispatches_paginated_collection_and_assembles_captured_documents(
     )
 
     assert final_html.index("First page") < final_html.index("Second page")
-    assert final_html.count("<section>") == 2
+    assert final_html.count("<main>") == 1
+    assert "<section>" not in final_html
 
 
 def test_agent_emits_labelled_operational_milestones_without_stage_reports(

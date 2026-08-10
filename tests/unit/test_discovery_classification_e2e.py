@@ -106,6 +106,8 @@ class CategorizationBrowserClient:
                     f"### Result\n{json.dumps(current_url)}\n### Ran Playwright code"
                 )
             self.document_requests += 1
+            assert arguments["element"] == "Reports content"
+            assert arguments["target"] == "e-reports"
             return text_result(f"### Result\n{json.dumps(self._document_html())}")
         if tool_name == "browser_close":
             return text_result("Browser closed")
@@ -125,13 +127,9 @@ class CategorizationBrowserClient:
 
     def _document_html(self) -> str:
         if self.page_kind == "numbered":
-            return (
-                "<html><head></head><body><main>"
-                f"<p>Report {self.current_page}</p><a href='detail'>Read more</a>"
-                "</main></body></html>"
-            )
+            return f"<main><p>Report {self.current_page}</p><a href='detail'>Read more</a></main>"
         additional_item = "<p>Item 2</p>" if self.has_revealed_increment else ""
-        return f"<html><head></head><body><main><p>Item 1</p>{additional_item}</main></body></html>"
+        return f"<main><p>Item 1</p>{additional_item}</main>"
 
 
 def install_browser_session(
@@ -228,6 +226,8 @@ def install_categorizing_model(
                     {
                         "complete": True,
                         "evidence": ["The current static result page is fully retained."],
+                        "selected_region_element": "Reports content",
+                        "selected_region_target": "e-reports",
                     },
                 )
             if stage_turn_counts[stage_name] == 1:
@@ -239,12 +239,14 @@ def install_categorizing_model(
                 {
                     "complete": True,
                     "evidence": ["The observed end retains both report items."],
+                    "selected_region_element": "Reports content",
+                    "selected_region_target": "e-reports",
                 },
             )
         if stage_name == "pagination_advance":
             if "Page 1 of 2" in user_message:
                 if "browser_click" not in user_message:
-                    assert "Captured document count:\n1" in user_message
+                    assert "Captured region count:\n1" in user_message
                     assert "(no prior pagination progress)" in user_message
                     assert "Read more" in user_message
                     return _remote_turn("browser_click", {"element": "Next"})
@@ -258,7 +260,7 @@ def install_categorizing_model(
                 )
             assert "Page 2 of 2" in user_message
             assert "Actions:\n(no model-directed actions yet)" in user_message
-            assert "Captured document count:\n2" in user_message
+            assert "Captured region count:\n2" in user_message
             assert "Captured report page 1 of 2." in user_message
             return _completion_turn(
                 "complete_pagination_advance",

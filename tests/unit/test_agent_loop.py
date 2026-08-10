@@ -196,7 +196,7 @@ def test_stage_context_exposes_only_permitted_prior_stage_inputs() -> None:
         preceding_state=preceding_state,
     )
     pagination = PaginationAdvanceStage(
-        captured_document_count=3,
+        captured_region_count=3,
         progress="Pages 1-3 cover releases through version 2.0.",
     ).build_messages(
         "task",
@@ -214,7 +214,7 @@ def test_stage_context_exposes_only_permitted_prior_stage_inputs() -> None:
     assert "before probe" in collection[1]["content"]
     assert "browser_navigate" not in collection[1]["content"]
     assert "Report view" not in pagination[1]["content"]
-    assert "Captured document count:\n3" in pagination[1]["content"]
+    assert "Captured region count:\n3" in pagination[1]["content"]
     assert "Pages 1-3 cover releases through version 2.0." in pagination[1]["content"]
     assert "before probe" in pagination[1]["content"]
 
@@ -253,7 +253,11 @@ def test_stage_prompts_define_page_retrieval_waiting_and_completion_contracts() 
     assert "An unrelated or redundant ambiguous control alone" in discovery_prompt
     assert "prevents establishing a complete supported collection path" in discovery_prompt
     assert "choose unknown" in discovery_prompt
-    assert "semantic waits" in messages_by_stage["collection"][0]["content"]
+    collection_prompt = messages_by_stage["collection"][0]["content"]
+    assert "semantic waits" in collection_prompt
+    assert "exactly one current contiguous element" in collection_prompt
+    assert "Exclude surrounding page-level header" in collection_prompt
+    assert "do not select the full body as a fallback" in collection_prompt
     pagination_prompt = messages_by_stage["pagination"][0]["content"]
     assert pagination_prompt.startswith(
         "Assess whether pagination should stop at the current result page or advance exactly one"

@@ -53,6 +53,10 @@ class ToolCatalog:
                 f"Local completion tool {completion_tool.name!r} conflicts with a remote "
                 "Playwright tool."
             )
+        validate_input_schema(
+            completion_tool.name,
+            completion_tool.report_type.model_json_schema(),
+        )
         return ToolCatalog(
             openai_tools=[*self.openai_tools, completion_tool.openai_schema],
             remote_name_by_model_name=self.remote_name_by_model_name,

@@ -1,4 +1,4 @@
-"""Concrete greedy collection strategies for rendered documents."""
+"""Concrete greedy collection strategies for selected rendered content."""
 
 from __future__ import annotations
 
@@ -8,13 +8,18 @@ from typing import TypeAlias, cast
 from .agent_context import CollectionStage, PageState, PaginationAdvanceStage
 from .agent_loop import StageRunner
 from .errors import ExecutionLimitError, PaginationTransitionError, UnsuccessfulStageOutcomeError
-from .rendered_document import RenderedDocument
-from .stage_models import CollectionReport, CollectionStrategy, PaginationAdvanceReport
+from .selected_content import CapturedContent
+from .stage_models import (
+    CollectionReport,
+    CollectionStrategy,
+    PaginationAdvanceReport,
+    SelectedRegion,
+)
 
-CaptureDocument: TypeAlias = Callable[[], Awaitable[RenderedDocument]]
+CaptureContent: TypeAlias = Callable[[SelectedRegion], Awaitable[CapturedContent]]
 CollectionHandler: TypeAlias = Callable[
-    [StageRunner, str, PageState, CaptureDocument, int],
-    Awaitable[list[RenderedDocument]],
+    [StageRunner, str, PageState, CaptureContent, int],
+    Awaitable[list[CapturedContent]],
 ]
 PageIdentity: TypeAlias = tuple[str, str]
 
@@ -23,7 +28,7 @@ async def collect_retained_final_document(
     stage_runner: StageRunner,
     task: str,
     initial_state: PageState,
-) -> PageState:
+) -> tuple[PageState, SelectedRegion]:
     """Exhaust retainable page/view content and reject incomplete collection evidence."""
 
     result = await stage_runner.run(
@@ -34,50 +39,52 @@ async def collect_retained_final_document(
     report = cast(CollectionReport, result.report)
     if not report.complete:
         raise UnsuccessfulStageOutcomeError("Retained-document collection did not complete.")
-    return result.page_state
+    return result.page_state, report.selected_region
 
 
 async def collect_retained_document_strategy(
     stage_runner: StageRunner,
     task: str,
     initial_state: PageState,
-    capture_document: CaptureDocument,
+    capture_content: CaptureContent,
     max_paginated_documents: int,
-) -> list[RenderedDocument]:
-    """Collect and capture the one final document for the retained strategy."""
+) -> list[CapturedContent]:
+    """Collect and capture one selected region for the retained strategy."""
 
     del max_paginated_documents
-    await collect_retained_final_document(stage_runner, task, initial_state)
-    return [await capture_document()]
+    _, selected_region = await collect_retained_final_document(stage_runner, task, initial_state)
+    return [await capture_content(selected_region)]
 
 
 async def collect_paginated_documents(
     stage_runner: StageRunner,
     task: str,
     initial_state: PageState,
-    capture_document: CaptureDocument,
+    capture_content: CaptureContent,
     max_paginated_documents: int,
-) -> list[RenderedDocument]:
+) -> list[CapturedContent]:
     """Compose retained collection and semantic advancement over replacing result pages."""
 
-    captured_documents: list[RenderedDocument] = []
+    captured_content: list[CapturedContent] = []
     collected_page_identities: set[PageIdentity] = set()
     pagination_progress = ""
     current_state = initial_state
 
     while True:
-        current_state = await collect_retained_final_document(stage_runner, task, current_state)
+        current_state, selected_region = await collect_retained_final_document(
+            stage_runner, task, current_state
+        )
         current_identity = _page_identity(current_state)
         if current_identity in collected_page_identities:
             raise PaginationTransitionError(
                 "Paginated collection reached a previously collected page state."
             )
         collected_page_identities.add(current_identity)
-        captured_documents.append(await capture_document())
+        captured_content.append(await capture_content(selected_region))
 
         advance_result = await stage_runner.run(
             PaginationAdvanceStage(
-                captured_document_count=len(captured_documents),
+                captured_region_count=len(captured_content),
                 progress=pagination_progress,
             ),
             task,
@@ -90,8 +97,8 @@ async def collect_paginated_documents(
                 raise PaginationTransitionError(
                     "Pagination reported completion after taking a browser action."
                 )
-            return captured_documents
-        if len(captured_documents) >= max_paginated_documents:
+            return captured_content
+        if len(captured_content) >= max_paginated_documents:
             raise ExecutionLimitError(
                 "Paginated-document limit reached before collection completion."
             )

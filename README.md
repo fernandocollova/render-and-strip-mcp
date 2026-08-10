@@ -8,9 +8,10 @@ render_and_strip_page(url, task) -> clean semantic HTML
 
 For each request it opens a fresh isolated session with an official Playwright MCP server, uses a
 tool-calling model to reach the requested page or view and greedily collect its revealable retained
-or same-origin paginated content, validates every top-level origin, and returns only one cleaned
-semantic HTML document containing safe visible whole-page text. Failures are MCP tool errors;
-partial HTML is never returned.
+or same-origin paginated content, validates every top-level origin, and returns one normalized
+semantic HTML document containing only selected visible task-content regions. Surrounding page
+chrome is excluded by the selected boundary. Failures are MCP tool errors; partial HTML is never
+returned.
 
 ## Requirements
 
@@ -64,7 +65,7 @@ it.
   pages across the invocation. Reaching that limit succeeds only if the final page's semantic or
   natural completion assessment succeeds; otherwise the request fails without partial HTML.
   Navigation calls use the navigation timeout, while each other browser operation (tab handling,
-  URL checks, snapshots, actions, and document capture) uses its own action timeout.
+  URL checks, snapshots, actions, and selected-region capture) uses its own action timeout.
 - `max_html_bytes = 0` permits unlimited clean HTML. A positive limit applies to the complete
   assembled UTF-8 result; an overage is an error, not a truncation.
 - Optional reasoning progress uses `reasoning_progress_max_items = 0` and
@@ -93,23 +94,33 @@ continues to reveal relevant content until a configured stage or total limit is 
 than returning an incomplete document.
 
 For `paginated-documents`, the same retained-document collection runs independently on each result
-page. The service captures that whole visibility-filtered page before an immediate next-page action
-can replace it. A dedicated model stage uses the original task and compact cumulative progress to
+page. From each final fresh snapshot, collection identifies exactly one contiguous task-relevant
+region and its current Playwright target. The service immediately captures that region's
+visibility-filtered subtree before an immediate next-page action can replace it. The boundary
+excludes surrounding page-level header, navigation, sidebar, search, and footer chrome; there is no
+full-body fallback. A dedicated model stage uses the original task and compact cumulative progress to
 decide whether later pages can still be relevant. Natural terminal pagination is the default when
 the task has no explicit cutoff; uncertainty causes continuation rather than early completion. A
-semantic boundary preserves its complete captured page. Traversal never treats record-detail,
-`Read more`, or expanded-reading links as pagination, and unchanged or repeated page states fail
-instead of duplicating content. Put semantic cutoffs directly in `task`, for example “retrieve
+semantic boundary preserves its complete captured selected region. Traversal never treats
+record-detail, `Read more`, or expanded-reading links as pagination, and unchanged or repeated page
+states fail instead of duplicating content. Put semantic cutoffs directly in `task`, for example “retrieve
 releases through version 2.0”; there is no site-, date-, or version-specific parser.
 
 Every model-directed action is followed by an orchestration-owned fresh `browser_snapshot` after
 the optional settle grace. The service restores the original tab and enforces the origin established
-by initial navigation before each snapshot and document capture. Only after the selected strategy
-completes does it clean the captured HTML. One capture uses the existing cleaner output unchanged;
-multiple captures resolve links against their respective source URLs and place complete cleaned
-bodies in ordered sections under one valid HTML document. Cleaning may intentionally omit DOM
-content under its visibility, element, attribute, and size policies; the service does not perform
-fine-grained fact extraction, verify facts after cleaning, or return partial captures.
+by initial navigation before each snapshot and selected-region capture. Each region is cleaned
+independently, with relative links resolved against that region's source URL. One and many captures
+then use the same fixed shape, in capture order and without page wrappers:
+
+```html
+<!doctype html>
+<html><head><meta charset="utf-8"></head><body><main>…</main></body></html>
+```
+
+An outer selected `main` is unwrapped so the result always has exactly one `main`. Cleaning may
+intentionally omit DOM content under its visibility, element, attribute, and aggregate size
+policies; the service does not perform fine-grained fact extraction, verify facts after cleaning,
+or return partial captures.
 
 ## Tested local dependency stack
 
@@ -196,5 +207,7 @@ The tested browser contract is `@playwright/mcp` 0.0.78 at Streamable HTTP path 
 as `mcr.microsoft.com/playwright/mcp:v0.0.78@sha256:3d871c22ea2d4cca0966e2cfb1860e1cb03eb7353725a3d6cffd133296fb04eb`.
 The service requires `browser_navigate(url)`, `browser_tabs(action, index?, url?)`,
 `browser_snapshot(target?, depth?, boxes?, filename?)`, `browser_evaluate(function, element?,
-target?, filename?)`, and `browser_close()`. The pinned llama.cpp model image uses release b10273 at
+target?, filename?)`, and `browser_close()`. Selected capture uses the targeted evaluate form with
+all of `function`, the human-readable `element`, and the fresh snapshot `target`; the function
+receives that resolved element directly. The pinned llama.cpp model image uses release b10273 at
 `ghcr.io/ggml-org/llama.cpp@sha256:14ab06c571008509adcedf635301edfa98071b1b8345269921d31ea4d519ae47`.

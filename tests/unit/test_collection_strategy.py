@@ -52,7 +52,12 @@ def test_retained_strategy_returns_only_a_complete_final_page_state(
         assert isinstance(stage, CollectionStage)
         assert stage.strategy == "retained-final-document"
         return StageRunResult(
-            CollectionReport(complete=False, evidence=["More content may remain."]),
+            CollectionReport(
+                complete=False,
+                evidence=["More content may remain."],
+                selected_region_element="Report",
+                selected_region_target="e7",
+            ),
             initial_page_state,
         )
 

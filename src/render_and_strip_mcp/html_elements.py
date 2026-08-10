@@ -4,7 +4,6 @@ from __future__ import annotations
 
 ALLOWED_TAGS = frozenset(
     {
-        "main",
         "article",
         "section",
         "header",
