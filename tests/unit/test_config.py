@@ -54,6 +54,7 @@ def test_settings_apply_documented_defaults() -> None:
     assert settings.output.max_html_bytes == 0
     assert settings.progress.reasoning_progress_max_items == 0
     assert settings.progress.reasoning_progress_min_interval_seconds == 0
+    assert settings.logging.level == "INFO"
 
 
 def test_toml_configuration_is_validated(tmp_path: Path) -> None:

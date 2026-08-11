@@ -56,6 +56,36 @@ def test_cli_loads_the_optional_configuration_path(monkeypatch, tmp_path: Path) 
     }
 
 
+def test_configure_logging_uses_the_configured_level(monkeypatch) -> None:
+    """Process logging is initialized once with the controlled logging-level setting."""
+
+    observed: dict[str, object] = {}
+    monkeypatch.setattr(
+        cli_module.logging,
+        "basicConfig",
+        lambda **kwargs: observed.update(kwargs),
+    )
+    settings = Settings.model_validate(
+        {
+            "playwright_mcp": {"endpoint": "https://browser.example/mcp"},
+            "llm": {
+                "model": "test-model",
+                "api_base": "https://model.example/v1",
+                "api_key": "test-key",
+            },
+            "logging": {"level": "DEBUG"},
+        }
+    )
+
+    cli_module.configure_logging(settings)
+
+    assert observed == {
+        "level": "DEBUG",
+        "format": "%(asctime)s %(levelname)s %(name)s: %(message)s",
+        "stream": cli_module.sys.stderr,
+    }
+
+
 def test_main_starts_streamable_http_server(monkeypatch) -> None:
     """Startup creates the FastMCP application with configured bind settings."""
 

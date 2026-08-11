@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 
 import pytest
@@ -60,6 +61,19 @@ def test_zero_interval_delivers_non_blank_fragments_immediately() -> None:
     asyncio.run(exercise())
 
     assert context.notifications == [(1, "first"), (1, "second")]
+
+
+def test_progress_reports_are_logged_at_debug_level(caplog: pytest.LogCaptureFixture) -> None:
+    """Each submitted MCP progress batch is available for debug troubleshooting."""
+
+    caplog.set_level(logging.DEBUG, logger="render_and_strip_mcp.reasoning_progress")
+    context = FakeProgressContext()
+    reporter = ReasoningProgressReporter(0, 0, context)  # type: ignore[arg-type]
+
+    asyncio.run(reporter.accept("model reasoning"))
+
+    assert context.notifications == [(1, "model reasoning")]
+    assert caplog.messages == ["Reporting reasoning progress with 1 item(s): model reasoning"]
 
 
 def test_idle_aware_reporter_resets_deadline_for_meaningful_progress() -> None:

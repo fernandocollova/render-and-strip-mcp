@@ -59,10 +59,16 @@ class ReasoningProgressReporter:
         else:
             batch_fragments = self._buffered_fragments
             self._buffered_fragments = []
+        message = "\n".join(batch_fragments)
+        logger.debug(
+            "Reporting reasoning progress with %s item(s): %s",
+            len(batch_fragments),
+            message,
+        )
         try:
             await self._context.report_progress(
                 progress=len(batch_fragments),
-                message="\n".join(batch_fragments),
+                message=message,
             )
         except Exception as error:
             logger.warning("Reasoning progress delivery failed: %s", error)

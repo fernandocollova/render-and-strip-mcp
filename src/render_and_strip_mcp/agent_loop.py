@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
@@ -15,6 +16,8 @@ from .reasoning_progress import IdleAwareReasoningProgressReporter, ReasoningPro
 from .stage_models import StageReportValue
 
 BrowserAction = Callable[[str, dict[str, object]], Awaitable[PageState]]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -56,6 +59,12 @@ class StageRunner:
         state = StageRunState(current_state=initial_state)
 
         for turn_index in range(self.agent_settings.max_model_turns):
+            logger.debug(
+                "Starting %s model turn %s of %s.",
+                stage.stage_name,
+                turn_index + 1,
+                self.agent_settings.max_model_turns,
+            )
             messages = stage.build_messages(
                 task,
                 state.action_log,
@@ -79,6 +88,11 @@ class StageRunner:
                 )
             if model_turn.tool_call.kind == "completion":
                 report = completion_tool.parse(model_turn.tool_call.arguments)
+                logger.debug(
+                    "Completed %s stage after %s browser action(s).",
+                    stage.stage_name,
+                    state.browser_action_count,
+                )
                 return StageRunResult(report, state.current_state, state.browser_action_count)
             if model_turn.tool_call.kind != "remote":
                 raise ModelStreamError("Model requested an unsupported tool-call route.")
@@ -92,6 +106,7 @@ class StageRunner:
             remote_name = stage_catalog.remote_name_by_model_name[
                 model_turn.tool_call.model_tool_name
             ]
+            logger.debug("Executing %s during %s stage.", remote_name, stage.stage_name)
             state.preceding_state = state.current_state
             state.current_state = await self.execute_browser_action(
                 remote_name, model_turn.tool_call.arguments

@@ -74,6 +74,11 @@ it.
   settings govern one shared stream of provider `reasoning_content` and labelled operational
   milestones; milestones consume the same configured item allowance. Progress is sent only when
   the MCP caller accepts it.
+- Application logging writes to standard error. Set the `level` key in `[logging]` to `CRITICAL`,
+  `ERROR`, `WARNING`, `INFO` (the default), or `DEBUG`; the equivalent environment variable is
+  `RENDER_AND_STRIP_MCP_LOGGING__LEVEL`. Debug logging records model-stage activity and every
+  reasoning-progress batch submitted to the MCP caller, including its message. Do not enable it
+  where model reasoning may contain sensitive information.
 
 ### Greedy page/view retrieval
 
