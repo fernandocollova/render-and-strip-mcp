@@ -22,10 +22,6 @@ def test_observed_url_uses_normalized_origin_and_effective_port() -> None:
     policy = UrlPolicy("https://Example.test/path", allow_plain_http=False)
 
     assert policy.validate_initial_url() == Origin(scheme="https", host="example.test", port=443)
-    UrlPolicy("https://example.test/next", allow_plain_http=False).validate_observed_url(
-        policy.origin
-    )
+    policy.validate_observed_url("https://example.test/next")
     with pytest.raises(BrowserAgentError, match="left the initial document origin"):
-        UrlPolicy("https://example.test:8443/next", allow_plain_http=False).validate_observed_url(
-            policy.origin
-        )
+        policy.validate_observed_url("https://example.test:8443/next")

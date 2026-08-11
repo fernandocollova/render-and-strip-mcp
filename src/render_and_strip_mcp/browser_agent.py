@@ -34,7 +34,7 @@ from .stage_models import (
     ReconstructionReport,
     SelectedRegion,
 )
-from .url_policy import Origin, UrlPolicy
+from .url_policy import UrlPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -118,14 +118,12 @@ class BrowserAgent:
             )
         )
         initial_url = await self._current_url(session.client)
-        initial_origin = UrlPolicy(
-            initial_url,
-            self._settings.agent.allow_plain_http,
-        ).origin
+        url_policy = UrlPolicy(initial_url, self._settings.agent.allow_plain_http)
+        url_policy.validate_initial_url()
         initial_state = await self._capture_fresh_page_state(
             session.client,
             original_tab_index,
-            initial_origin,
+            url_policy,
         )
 
         async def execute_browser_action(tool_name: str, arguments: dict[str, object]) -> PageState:
@@ -134,7 +132,7 @@ class BrowserAgent:
                 tool_name,
                 arguments,
                 original_tab_index,
-                initial_origin,
+                url_policy,
             )
 
         stage_runner = StageRunner(
@@ -177,7 +175,7 @@ class BrowserAgent:
         reset_state = await self._capture_fresh_page_state(
             session.client,
             original_tab_index,
-            initial_origin,
+            url_policy,
         )
 
         await self._report_operational_status("Reconstruction")
@@ -199,7 +197,7 @@ class BrowserAgent:
             return await self._capture_selected_content(
                 session.client,
                 original_tab_index,
-                initial_origin,
+                url_policy,
                 selected_region,
             )
 
@@ -222,7 +220,7 @@ class BrowserAgent:
         self,
         client: Client,
         original_tab_index: int,
-        initial_origin: Origin,
+        url_policy: UrlPolicy,
         selected_region: SelectedRegion,
     ) -> CapturedContent:
         """Capture the selected current region before later actions can replace it."""
@@ -233,9 +231,7 @@ class BrowserAgent:
             self._settings.agent.browser_action_timeout_seconds,
         )
         source_url = await self._current_url(client)
-        UrlPolicy(source_url, self._settings.agent.allow_plain_http).validate_observed_url(
-            initial_origin
-        )
+        url_policy.validate_observed_url(source_url)
         try:
             async with asyncio.timeout(self._settings.agent.browser_action_timeout_seconds):
                 region_html = await fetch_visible_selected_region(
@@ -253,7 +249,7 @@ class BrowserAgent:
         tool_name: str,
         arguments: dict[str, object],
         original_tab_index: int,
-        initial_origin: Origin,
+        url_policy: UrlPolicy,
     ) -> PageState:
         """Run one model action and discard its stale result in favor of a fresh snapshot."""
 
@@ -264,13 +260,13 @@ class BrowserAgent:
         )
         action_result = await self._call_tool(client, tool_name, arguments, timeout_seconds)
         extract_text_result(action_result)
-        return await self._capture_fresh_page_state(client, original_tab_index, initial_origin)
+        return await self._capture_fresh_page_state(client, original_tab_index, url_policy)
 
     async def _capture_fresh_page_state(
         self,
         client: Client,
         original_tab_index: int,
-        initial_origin: Origin,
+        url_policy: UrlPolicy,
     ) -> PageState:
         """Optionally settle, restore the original tab, validate it, and snapshot it afresh."""
 
@@ -282,9 +278,7 @@ class BrowserAgent:
             self._settings.agent.browser_action_timeout_seconds,
         )
         current_url = await self._current_url(client)
-        UrlPolicy(current_url, self._settings.agent.allow_plain_http).validate_observed_url(
-            initial_origin
-        )
+        url_policy.validate_observed_url(current_url)
         snapshot = await self._call_tool(
             client,
             "browser_snapshot",

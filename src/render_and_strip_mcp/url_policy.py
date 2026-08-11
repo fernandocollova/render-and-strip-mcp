@@ -18,18 +18,21 @@ class Origin:
 
 
 class UrlPolicy:
-    """Apply HTTP(S) and same-origin checks to one caller or browser URL."""
+    """Apply HTTP(S) and same-origin checks anchored to one initial URL."""
 
-    def __init__(self, url: str, allow_plain_http: bool):
-        self.url = url
+    def __init__(self, initial_url: str, allow_plain_http: bool):
+        self.initial_url = initial_url
         self.allow_plain_http = allow_plain_http
 
     @property
     def origin(self) -> Origin:
         """Return this URL's normalized permitted origin."""
 
+        return self._origin_for_url(self.initial_url)
+
+    def _origin_for_url(self, url: str) -> Origin:
         try:
-            parsed_url = urlsplit(self.url)
+            parsed_url = urlsplit(url)
             port = parsed_url.port
         except ValueError as error:
             raise BrowserAgentError("URL has an invalid port.") from error
@@ -49,14 +52,15 @@ class UrlPolicy:
     def validate_initial_url(self) -> Origin:
         """Validate this caller-supplied initial URL and return its normalized origin."""
 
-        if not self.url.strip():
+        if not self.initial_url.strip():
             raise BrowserAgentError("The initial URL must not be empty.")
         return self.origin
 
-    def validate_observed_url(self, allowed_origin: Origin) -> None:
+    def validate_observed_url(self, observed_url: str) -> None:
         """Enforce that this browser-observed location remains at an allowed origin."""
 
-        if self.origin != allowed_origin:
+        allowed_origin = self.origin
+        if self._origin_for_url(observed_url) != allowed_origin:
             raise BrowserAgentError(
                 "Browser navigation left the initial document origin "
                 f"({allowed_origin.scheme}://{allowed_origin.host}:{allowed_origin.port})."
