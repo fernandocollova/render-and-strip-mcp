@@ -140,7 +140,7 @@ The server SHALL track the tab used for initial navigation as the only page elig
 - **THEN** the server does not return the downloaded content and continues tracking the initial top-level page
 
 ### Requirement: Bounded agent execution
-The server SHALL enforce configurable inclusive per-stage limits for model turns and model-directed browser actions for access, discovery, reconstruction, retained-document collection, and each pagination-advance iteration, plus a configurable positive hard paginated-document limit and the existing invocation-wide time and operation limits. The defaults SHALL be 12 model turns and 30 model-directed browser actions for each stage invocation; 25 captured paginated documents; 600 total seconds; 20 navigation seconds; 15 seconds for each other browser operation; 90 model-request seconds; 0 settle-grace seconds; and 10 cleanup seconds. The existing final-turn, browser-action, timeout, cleanup, and no-partial-output rules SHALL apply to every new stage invocation and document capture. Per-page stage limits SHALL reset for each pagination iteration, while the total timeout and paginated-document limit SHALL remain invocation-wide.
+The server SHALL enforce configurable inclusive per-stage limits for model turns and model-directed browser actions for access, discovery, reconstruction, retained-document collection, and each pagination-advance iteration, plus a configurable positive hard paginated-document limit, an invocation-wide idle limit, and operation limits. The defaults SHALL be 12 model turns and 30 model-directed browser actions for each stage invocation; 25 captured paginated documents; 600 idle seconds; 20 navigation seconds; 15 seconds for each other browser operation; 90 model-request seconds; 0 settle-grace seconds; and 10 cleanup seconds. The idle deadline SHALL reset when the agent receives non-blank model reasoning or reports an operational milestone. The existing final-turn, browser-action, timeout, cleanup, and no-partial-output rules SHALL apply to every new stage invocation and document capture. Per-page stage limits SHALL reset for each pagination iteration, while the idle limit and paginated-document limit SHALL remain invocation-wide.
 
 #### Scenario: Browser action limit is exceeded
 - **WHEN** any model-guided stage invocation requests more browser actions than its configured maximum
@@ -159,7 +159,7 @@ The server SHALL enforce configurable inclusive per-stage limits for model turns
 - **THEN** the server rejects the action before remote execution because mandatory stage completion can no longer occur within the turn allowance
 
 #### Scenario: Model completes within limits
-- **WHEN** every required stage submits its valid completion report within its limits and before the total timeout expires
+- **WHEN** every required stage submits its valid completion report within its limits without the idle timeout expiring
 - **THEN** the server proceeds to final document cleaning or assembly after collection completion
 
 #### Scenario: Browser-agent processing starts

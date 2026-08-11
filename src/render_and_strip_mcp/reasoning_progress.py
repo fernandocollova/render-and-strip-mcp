@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Callable
@@ -67,3 +68,39 @@ class ReasoningProgressReporter:
             logger.warning("Reasoning progress delivery failed: %s", error)
             return
         self._last_delivery_time = self._clock()
+
+
+class IdleAwareReasoningProgressReporter:
+    """Reset an active invocation's idle deadline before forwarding progress."""
+
+    def __init__(
+        self,
+        reporter: ReasoningProgressReporter,
+        idle_timeout: asyncio.Timeout,
+        idle_timeout_seconds: float,
+    ):
+        self._reporter = reporter
+        self._idle_timeout = idle_timeout
+        self._idle_timeout_seconds = idle_timeout_seconds
+        self._event_loop = asyncio.get_running_loop()
+
+    async def accept(self, reasoning_fragment: str) -> None:
+        """Record meaningful reasoning activity, then forward it for delivery."""
+
+        if reasoning_fragment.strip():
+            self._renew_idle_deadline()
+        await self._reporter.accept(reasoning_fragment)
+
+    async def accept_operational_status(self, status: str) -> None:
+        """Forward an orchestration milestone as activity and labelled progress."""
+
+        self._renew_idle_deadline()
+        await self._reporter.accept_operational_status(status)
+
+    async def flush_if_needed(self) -> None:
+        """Forward a pending progress flush under the reporter's delivery policy."""
+
+        await self._reporter.flush_if_needed()
+
+    def _renew_idle_deadline(self) -> None:
+        self._idle_timeout.reschedule(self._event_loop.time() + self._idle_timeout_seconds)

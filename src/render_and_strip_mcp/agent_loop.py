@@ -11,7 +11,7 @@ from .config import AgentSettings, LlmSettings
 from .errors import ExecutionLimitError, MissingStageCompletionError, ModelStreamError
 from .model_stream import stream_model_turn
 from .playwright_tools import ToolCatalog
-from .reasoning_progress import ReasoningProgressReporter
+from .reasoning_progress import IdleAwareReasoningProgressReporter, ReasoningProgressReporter
 from .stage_models import StageReportValue
 
 BrowserAction = Callable[[str, dict[str, object]], Awaitable[PageState]]
@@ -44,7 +44,7 @@ class StageRunner:
     agent_settings: AgentSettings
     tool_catalog: ToolCatalog
     execute_browser_action: BrowserAction
-    reasoning_progress: ReasoningProgressReporter
+    reasoning_progress: ReasoningProgressReporter | IdleAwareReasoningProgressReporter
 
     async def run(self, stage: Stage, task: str, initial_state: PageState) -> StageRunResult:
         """Run fresh model turns until one stage submits its required local completion tool."""

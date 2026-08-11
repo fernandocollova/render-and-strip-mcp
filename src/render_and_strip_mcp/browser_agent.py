@@ -25,7 +25,7 @@ from .errors import (
 from .html_cleaner import normalize_captured_content
 from .mcp_results import extract_json_string_result, extract_text_result
 from .playwright_tools import PlaywrightSession, open_playwright_session
-from .reasoning_progress import ReasoningProgressReporter
+from .reasoning_progress import IdleAwareReasoningProgressReporter, ReasoningProgressReporter
 from .selected_content import CapturedContent, fetch_visible_selected_region
 from .stage_models import (
     AccessCheckpoint,
@@ -55,7 +55,13 @@ class BrowserAgent:
         final_html = ""
         try:
             try:
-                async with asyncio.timeout(self._settings.agent.total_timeout_seconds):
+                timeout = asyncio.timeout(self._settings.agent.idle_timeout_seconds)
+                async with timeout as idle_timeout:
+                    invocation_progress = IdleAwareReasoningProgressReporter(
+                        self._reasoning_progress,
+                        idle_timeout,
+                        self._settings.agent.idle_timeout_seconds,
+                    )
                     if not task.strip():
                         raise BrowserAgentError("The browser task must not be empty.")
                     UrlPolicy(url, self._settings.agent.allow_plain_http).validate_initial_url()
@@ -63,9 +69,9 @@ class BrowserAgent:
                         str(self._settings.playwright_mcp.endpoint)
                     )
                     session = await session_manager.__aenter__()
-                    final_html = await self._run_session(session, url, task)
+                    final_html = await self._run_session(session, url, task, invocation_progress)
             except TimeoutError as error:
-                raise ExecutionLimitError("Total invocation time limit exceeded.") from error
+                raise ExecutionLimitError("Agent idle time limit exceeded.") from error
         except litellm.ContextWindowExceededError as error:
             translated_error = BrowserAgentError(f"Model context exhausted: {error}")
             primary_error = translated_error
@@ -96,10 +102,16 @@ class BrowserAgent:
                 await session_manager.__aexit__(None, None, None)
         return final_html
 
-    async def _run_session(self, session: PlaywrightSession, url: str, task: str) -> str:
+    async def _run_session(
+        self,
+        session: PlaywrightSession,
+        url: str,
+        task: str,
+        progress: IdleAwareReasoningProgressReporter,
+    ) -> str:
         """Run all greedy stages, then clean the successfully captured documents."""
 
-        await self._report_operational_status("Initial navigation")
+        await progress.accept_operational_status("Initial navigation")
         initial_navigation = await session.client.call_tool(
             "browser_navigate",
             {"url": url},
@@ -135,10 +147,10 @@ class BrowserAgent:
             self._settings.agent,
             session.tool_catalog,
             execute_browser_action,
-            self._reasoning_progress,
+            progress,
         )
 
-        await self._report_operational_status("Access")
+        await progress.accept_operational_status("Access")
         access_result = await stage_runner.run(
             AccessStage(),
             task,
@@ -146,7 +158,7 @@ class BrowserAgent:
         )
         checkpoint = cast(AccessCheckpoint, access_result.report)
 
-        await self._report_operational_status("Discovery")
+        await progress.accept_operational_status("Discovery")
         discovery_result = await stage_runner.run(
             DiscoveryStage(),
             task,
@@ -159,7 +171,7 @@ class BrowserAgent:
             )
         collection_strategy = cast(CollectionStrategy, discovery_report.strategy)
 
-        await self._report_operational_status("Reset")
+        await progress.accept_operational_status("Reset")
         reset_navigation = await session.client.call_tool(
             "browser_navigate",
             {"url": url},
@@ -172,7 +184,7 @@ class BrowserAgent:
             url_policy,
         )
 
-        await self._report_operational_status("Reconstruction")
+        await progress.accept_operational_status("Reconstruction")
         reconstruction_result = await stage_runner.run(
             ReconstructionStage(checkpoint),
             task,
@@ -184,7 +196,7 @@ class BrowserAgent:
                 "Checkpoint reconstruction did not verify the target page state."
             )
 
-        await self._report_operational_status("Collection")
+        await progress.accept_operational_status("Collection")
         collection_handler = COLLECTION_STRATEGIES[collection_strategy]
 
         async def capture_content(selected_region: SelectedRegion) -> CapturedContent:
@@ -203,7 +215,7 @@ class BrowserAgent:
             self._settings.agent.max_paginated_documents,
         )
 
-        await self._report_operational_status("Final extraction and cleaning")
+        await progress.accept_operational_status("Final extraction and cleaning")
         return normalize_captured_content(
             captured_content,
             self._settings.agent.allow_plain_http,
@@ -289,11 +301,6 @@ class BrowserAgent:
             timeout=self._settings.agent.browser_action_timeout_seconds,
         )
         return extract_json_string_result(result)
-
-    async def _report_operational_status(self, status: str) -> None:
-        """Forward an orchestration milestone without presenting it as model reasoning."""
-
-        await self._reasoning_progress.accept_operational_status(status)
 
     async def _close_browser(self, client: Client) -> None:
         """Close the isolated remote browser exactly once, shielding it from cancellation."""
