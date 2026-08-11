@@ -22,6 +22,33 @@ from .stage_models import (
 
 logger = logging.getLogger(__name__)
 
+ACCESS_AND_RECONSTRUCTION_BROWSER_TOOLS = frozenset(
+    {
+        "browser_click",
+        "browser_drag",
+        "browser_fill_form",
+        "browser_find",
+        "browser_handle_dialog",
+        "browser_hover",
+        "browser_navigate",
+        "browser_navigate_back",
+        "browser_press_key",
+        "browser_select_option",
+        "browser_type",
+        "browser_wait_for",
+    }
+)
+DISCOVERY_AND_COLLECTION_BROWSER_TOOLS = frozenset(
+    {
+        "browser_click",
+        "browser_find",
+        "browser_hover",
+        "browser_press_key",
+        "browser_wait_for",
+    }
+)
+PAGINATION_ADVANCE_BROWSER_TOOLS = frozenset({"browser_click", "browser_wait_for"})
+
 
 @dataclass(frozen=True)
 class ArgumentKind:
@@ -175,6 +202,7 @@ class Stage:
     stage_name: ClassVar[StageName]
     system_prompt: ClassVar[str]
     completion_tool: ClassVar[CompletionTool]
+    allowed_browser_tools: ClassVar[frozenset[str]]
     include_preceding_state: ClassVar[bool] = False
 
     def build_messages(
@@ -224,6 +252,7 @@ class AccessStage(Stage):
         "target state, any reconstruction instructions, and verification conditions."
     )
     completion_tool = ACCESS_COMPLETION_TOOL
+    allowed_browser_tools = ACCESS_AND_RECONSTRUCTION_BROWSER_TOOLS
 
 
 class DiscoveryStage(Stage):
@@ -253,6 +282,7 @@ class DiscoveryStage(Stage):
         "with strategy and evidence."
     )
     completion_tool = DISCOVERY_COMPLETION_TOOL
+    allowed_browser_tools = DISCOVERY_AND_COLLECTION_BROWSER_TOOLS
     include_preceding_state = True
 
 
@@ -270,6 +300,7 @@ class ReconstructionStage(Stage):
         "only by calling complete_reconstruction with verified and evidence."
     )
     completion_tool = RECONSTRUCTION_COMPLETION_TOOL
+    allowed_browser_tools = ACCESS_AND_RECONSTRUCTION_BROWSER_TOOLS
 
     def additional_context(self) -> list[str]:
         """Expose the semantic checkpoint that this stage must restore."""
@@ -298,6 +329,7 @@ class CollectionStage(Stage):
         "snapshot reference."
     )
     completion_tool = COLLECTION_COMPLETION_TOOL
+    allowed_browser_tools = DISCOVERY_AND_COLLECTION_BROWSER_TOOLS
     include_preceding_state = True
 
     def additional_context(self) -> list[str]:
@@ -331,6 +363,7 @@ class PaginationAdvanceStage(Stage):
         "summary, and evidence."
     )
     completion_tool = PAGINATION_ADVANCE_COMPLETION_TOOL
+    allowed_browser_tools = PAGINATION_ADVANCE_BROWSER_TOOLS
     include_preceding_state = True
 
     def additional_context(self) -> list[str]:

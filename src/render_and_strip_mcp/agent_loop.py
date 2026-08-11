@@ -46,16 +46,13 @@ class StageRunner:
     execute_browser_action: BrowserAction
     reasoning_progress: ReasoningProgressReporter
 
-    async def run(
-        self,
-        stage: Stage,
-        task: str,
-        initial_state: PageState,
-    ) -> StageRunResult:
+    async def run(self, stage: Stage, task: str, initial_state: PageState) -> StageRunResult:
         """Run fresh model turns until one stage submits its required local completion tool."""
 
         completion_tool = stage.completion_tool
-        stage_catalog = self.tool_catalog.with_completion_tool(completion_tool)
+        stage_catalog = self.tool_catalog.restricted_to(
+            stage.allowed_browser_tools
+        ).with_completion_tool(completion_tool)
         state = StageRunState(current_state=initial_state)
 
         for turn_index in range(self.agent_settings.max_model_turns):
@@ -92,7 +89,7 @@ class StageRunner:
                 )
             if state.browser_action_count >= self.agent_settings.max_browser_actions:
                 raise ExecutionLimitError("Browser action limit exceeded.")
-            remote_name = self.tool_catalog.remote_name_by_model_name[
+            remote_name = stage_catalog.remote_name_by_model_name[
                 model_turn.tool_call.model_tool_name
             ]
             state.preceding_state = state.current_state

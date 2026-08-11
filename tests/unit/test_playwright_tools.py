@@ -82,6 +82,34 @@ def test_catalog_adds_local_completion_tool_without_exposing_or_rerouting_remote
     assert [tool["function"]["name"] for tool in catalog.openai_tools][-1] == "complete_access"
 
 
+def test_catalog_restriction_filters_schemas_and_remote_routing_consistently() -> None:
+    """An allowlist intersects discovered tools across both model and routing views."""
+
+    catalog = playwright_tools.build_tool_catalog(discovered_tools()).restricted_to(
+        frozenset({"browser_click", "browser_wait_for"})
+    )
+
+    assert [tool["function"]["name"] for tool in catalog.openai_tools] == ["browser_click"]
+    assert catalog.remote_name_by_model_name == {"browser_click": "browser_click"}
+
+
+def test_catalog_restriction_preserves_an_existing_completion_tool() -> None:
+    """Restricting remote actions does not remove an already-added local completion schema."""
+
+    catalog = (
+        playwright_tools.build_tool_catalog(discovered_tools())
+        .with_completion_tool(ACCESS_COMPLETION_TOOL)
+        .restricted_to(frozenset({"browser_click"}))
+    )
+
+    assert [tool["function"]["name"] for tool in catalog.openai_tools] == [
+        "browser_click",
+        "complete_access",
+    ]
+    assert catalog.remote_name_by_model_name == {"browser_click": "browser_click"}
+    assert catalog.completion_tool is ACCESS_COMPLETION_TOOL
+
+
 def test_catalog_rejects_local_completion_name_collision() -> None:
     """An official remote tool must not shadow the stage-local completion route."""
 

@@ -5,10 +5,76 @@ import logging
 import pytest
 
 from render_and_strip_mcp.agent_context import (
+    AccessStage,
     BrowserToolArguments,
+    CollectionStage,
+    DiscoveryStage,
     PageState,
+    PaginationAdvanceStage,
+    ReconstructionStage,
+    Stage,
     format_browser_action,
 )
+from render_and_strip_mcp.stage_models import AccessCheckpoint
+
+ACCESS_AND_RECONSTRUCTION_TOOLS = frozenset(
+    {
+        "browser_click",
+        "browser_drag",
+        "browser_fill_form",
+        "browser_find",
+        "browser_handle_dialog",
+        "browser_hover",
+        "browser_navigate",
+        "browser_navigate_back",
+        "browser_press_key",
+        "browser_select_option",
+        "browser_type",
+        "browser_wait_for",
+    }
+)
+DISCOVERY_AND_COLLECTION_TOOLS = frozenset(
+    {
+        "browser_click",
+        "browser_find",
+        "browser_hover",
+        "browser_press_key",
+        "browser_wait_for",
+    }
+)
+
+
+@pytest.mark.parametrize(
+    ("stage", "expected_tools"),
+    [
+        (AccessStage(), ACCESS_AND_RECONSTRUCTION_TOOLS),
+        (
+            ReconstructionStage(AccessCheckpoint(target_state="View", verification=["Visible"])),
+            ACCESS_AND_RECONSTRUCTION_TOOLS,
+        ),
+        (DiscoveryStage(), DISCOVERY_AND_COLLECTION_TOOLS),
+        (CollectionStage("retained-final-document"), DISCOVERY_AND_COLLECTION_TOOLS),
+        (
+            PaginationAdvanceStage(1),
+            frozenset({"browser_click", "browser_wait_for"}),
+        ),
+    ],
+)
+def test_stages_define_immutable_browser_tool_policies(
+    stage: Stage, expected_tools: frozenset[str]
+) -> None:
+    """Each stage exposes only its immutable model-directed browser actions."""
+
+    assert isinstance(stage.allowed_browser_tools, frozenset)
+    assert stage.allowed_browser_tools == expected_tools
+    assert "browser_evaluate" not in stage.allowed_browser_tools
+
+
+def test_related_stages_share_browser_tool_policy_instances() -> None:
+    """Stages with identical policies reuse the same immutable set."""
+
+    assert AccessStage.allowed_browser_tools is ReconstructionStage.allowed_browser_tools
+    assert DiscoveryStage.allowed_browser_tools is CollectionStage.allowed_browser_tools
 
 
 def test_known_tool_arguments_use_kind_specific_formatters() -> None:

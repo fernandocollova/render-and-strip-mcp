@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import re
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Set
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from fastmcp import Client
 from mcp.types import Tool
@@ -44,6 +44,27 @@ class ToolCatalog:
     openai_tools: list[dict[str, object]]
     remote_name_by_model_name: dict[str, str]
     completion_tool: CompletionTool | None = None
+
+    def restricted_to(self, allowed_remote_names: Set[str]) -> ToolCatalog:
+        """Retain only discovered remote tools named by an allowlist intersection."""
+
+        allowed_model_names = allowed_remote_names.intersection(self.remote_name_by_model_name)
+        retained_schema_names = set(allowed_model_names)
+        if self.completion_tool is not None:
+            retained_schema_names.add(self.completion_tool.name)
+        return ToolCatalog(
+            openai_tools=[
+                tool
+                for tool in self.openai_tools
+                if cast(dict[str, object], tool["function"])["name"] in retained_schema_names
+            ],
+            remote_name_by_model_name={
+                model_name: remote_name
+                for model_name, remote_name in self.remote_name_by_model_name.items()
+                if model_name in allowed_model_names
+            },
+            completion_tool=self.completion_tool,
+        )
 
     def with_completion_tool(self, completion_tool: CompletionTool) -> ToolCatalog:
         """Add one locally routed stage-completion schema to this request's catalog."""

@@ -40,9 +40,26 @@ def llm_settings() -> LlmSettings:
 
 
 def catalog() -> ToolCatalog:
-    """Build a one-action model-tool mapping."""
+    """Build model schemas and routes for actions used across runner tests."""
 
-    return ToolCatalog([], {"browser_type": "browser_type"})
+    return ToolCatalog(
+        [
+            {
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "description": tool_name,
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+            for tool_name in ("browser_click", "browser_evaluate", "browser_type")
+        ],
+        {
+            "browser_click": "browser_click",
+            "browser_evaluate": "browser_evaluate",
+            "browser_type": "browser_type",
+        },
+    )
 
 
 def stage_runner(
@@ -173,6 +190,44 @@ def test_stage_runner_uses_public_interval_respecting_progress_flush(
 
     assert reporter.reasoning_fragments == ["model reasoning"]
     assert reporter.flush_count == 1
+
+
+def test_stage_runner_restricts_catalog_before_adding_completion_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The model request receives only stage-allowed discovered tools and local completion."""
+
+    observed_catalogs: list[ToolCatalog] = []
+
+    async def fake_stream_model_turn(*arguments: object) -> ModelTurn:
+        observed_catalogs.append(arguments[1])  # type: ignore[arg-type]
+        return ModelTurn(
+            content="",
+            tool_call=RequestedToolCall(
+                "complete_discovery",
+                "call-complete",
+                {"strategy": "retained-final-document", "evidence": ["Static."]},
+                "completion",
+            ),
+            reasoning_fragments=(),
+        )
+
+    async def unused_action(*arguments: object) -> PageState:
+        raise AssertionError("remote action should not execute")
+
+    monkeypatch.setattr(agent_loop, "stream_model_turn", fake_stream_model_turn)
+
+    asyncio.run(
+        stage_runner(unused_action, RecordingProgressReporter()).run(
+            DiscoveryStage(),
+            "task",
+            PageState("snapshot", "https://example.test/"),
+        )
+    )
+
+    catalog_names = [tool["function"]["name"] for tool in observed_catalogs[0].openai_tools]
+    assert catalog_names == ["browser_click", "complete_discovery"]
+    assert observed_catalogs[0].remote_name_by_model_name == {"browser_click": "browser_click"}
 
 
 def test_stage_context_exposes_only_permitted_prior_stage_inputs() -> None:
@@ -321,7 +376,7 @@ def test_stage_limits_allow_final_completion_and_reject_final_turn_action(
 
     remote_turn = ModelTurn(
         content="",
-        tool_call=RequestedToolCall("browser_type", "call-1", {}),
+        tool_call=RequestedToolCall("browser_click", "call-1", {}),
         reasoning_fragments=(),
     )
 
@@ -350,7 +405,7 @@ def test_stage_action_limits_are_independent_for_each_stage(
 
     remote_turn = ModelTurn(
         content="",
-        tool_call=RequestedToolCall("browser_type", "call-1", {}),
+        tool_call=RequestedToolCall("browser_click", "call-1", {}),
         reasoning_fragments=(),
     )
     completion_turns = {
