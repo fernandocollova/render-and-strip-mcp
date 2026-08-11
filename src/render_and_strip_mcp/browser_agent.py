@@ -42,11 +42,7 @@ logger = logging.getLogger(__name__)
 class BrowserAgent:
     """Run greedy staged browser collection in an isolated remote Playwright session."""
 
-    def __init__(
-        self,
-        settings: Settings,
-        reasoning_progress: ReasoningProgressReporter,
-    ):
+    def __init__(self, settings: Settings, reasoning_progress: ReasoningProgressReporter):
         self._settings = settings
         self._reasoning_progress = reasoning_progress
 
