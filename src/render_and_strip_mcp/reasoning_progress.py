@@ -37,6 +37,7 @@ class ReasoningProgressReporter:
         normalized_fragment = reasoning_fragment.strip()
         if not normalized_fragment:
             return
+        logger.debug("Accepting fragment: %s", normalized_fragment)
         self._buffered_fragments.append(normalized_fragment)
         await self.flush_if_needed()
 
@@ -60,11 +61,6 @@ class ReasoningProgressReporter:
             batch_fragments = self._buffered_fragments
             self._buffered_fragments = []
         message = "\n".join(batch_fragments)
-        logger.debug(
-            "Reporting reasoning progress with %s item(s): %s",
-            len(batch_fragments),
-            message,
-        )
         try:
             await self._context.report_progress(
                 progress=len(batch_fragments),
