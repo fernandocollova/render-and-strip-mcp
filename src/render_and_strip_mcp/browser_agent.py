@@ -100,11 +100,10 @@ class BrowserAgent:
         """Run all greedy stages, then clean the successfully captured documents."""
 
         await self._report_operational_status("Initial navigation")
-        initial_navigation = await self._call_tool(
-            session.client,
+        initial_navigation = await session.client.call_tool(
             "browser_navigate",
             {"url": url},
-            self._settings.agent.navigation_timeout_seconds,
+            timeout=self._settings.agent.navigation_timeout_seconds,
         )
         extract_text_result(initial_navigation)
         original_tab_index = current_tab_index(
@@ -161,11 +160,10 @@ class BrowserAgent:
         collection_strategy = cast(CollectionStrategy, discovery_report.strategy)
 
         await self._report_operational_status("Reset")
-        reset_navigation = await self._call_tool(
-            session.client,
+        reset_navigation = await session.client.call_tool(
             "browser_navigate",
             {"url": url},
-            self._settings.agent.navigation_timeout_seconds,
+            timeout=self._settings.agent.navigation_timeout_seconds,
         )
         extract_text_result(reset_navigation)
         reset_state = await self._capture_fresh_page_state(
@@ -254,7 +252,7 @@ class BrowserAgent:
             if tool_name in {"browser_navigate", "browser_navigate_back"}
             else self._settings.agent.browser_action_timeout_seconds
         )
-        action_result = await self._call_tool(client, tool_name, arguments, timeout_seconds)
+        action_result = await client.call_tool(tool_name, arguments, timeout=timeout_seconds)
         extract_text_result(action_result)
         return await self._capture_fresh_page_state(client, original_tab_index, url_policy)
 
@@ -275,40 +273,22 @@ class BrowserAgent:
         )
         current_url = await self._current_url(client)
         url_policy.validate_observed_url(current_url)
-        snapshot = await self._call_tool(
-            client,
+        snapshot = await client.call_tool(
             "browser_snapshot",
             {},
-            self._settings.agent.browser_action_timeout_seconds,
+            timeout=self._settings.agent.browser_action_timeout_seconds,
         )
         return PageState(extract_text_result(snapshot), current_url)
 
     async def _current_url(self, client: Client) -> str:
         """Read the tracked page's documented top-level location through browser_evaluate."""
 
-        result = await self._call_tool(
-            client,
+        result = await client.call_tool(
             "browser_evaluate",
             {"function": "() => location.href"},
-            self._settings.agent.browser_action_timeout_seconds,
+            timeout=self._settings.agent.browser_action_timeout_seconds,
         )
         return extract_json_string_result(result)
-
-    async def _call_tool(
-        self,
-        client: Client,
-        tool_name: str,
-        arguments: dict[str, object],
-        timeout_seconds: float,
-    ) -> object:
-        """Apply a local deadline around one remote Playwright MCP call."""
-
-        try:
-            async with asyncio.timeout(timeout_seconds):
-                result = await client.call_tool(tool_name, arguments, timeout=timeout_seconds)
-        except TimeoutError as error:
-            raise ExecutionLimitError(f"Playwright {tool_name} time limit exceeded.") from error
-        return result
 
     async def _report_operational_status(self, status: str) -> None:
         """Forward an orchestration milestone without presenting it as model reasoning."""
