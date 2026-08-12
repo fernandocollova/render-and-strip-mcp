@@ -165,12 +165,13 @@ MCP deployments are responsible for the required isolated, non-shared browser-co
 After the Compose services are ready, run the browser and fixture integration suite:
 
 ```bash
-uv run pytest tests/integration --run-compose-integration --no-cov
+uv run pytest tests/integration --no-cov
 ```
 
 The focused command disables coverage because the 80% gate applies to the full suite. Endpoint
 options default to Compose service DNS names and can be overridden with `--compose-app-endpoint`,
-`--compose-fixture-url`, `--compose-model-api-base`, and `--compose-playwright-endpoint`.
+`--compose-fixture-url`, `--compose-model-api-base`, and `--compose-playwright-endpoint`. Use
+`--skip-compose-integration` only when the Compose services are intentionally unavailable.
 
 It uses the explicit plain-HTTP integration configuration, exercises the official Playwright MCP
 wire behavior and rendered-document cleanup against `http://test-site:8081/`, checks the actual
