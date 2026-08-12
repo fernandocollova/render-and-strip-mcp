@@ -6,13 +6,13 @@ import pytest
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    """Register explicit opt-in and endpoint overrides for the Compose test stack."""
+    """Register Compose test controls and endpoint overrides."""
 
     compose_group = parser.getgroup("compose integration")
     compose_group.addoption(
-        "--run-compose-integration",
+        "--skip-compose-integration",
         action="store_true",
-        help="Run tests against the available Docker Compose services.",
+        help="Skip tests against the available Docker Compose services.",
     )
     compose_group.addoption(
         "--compose-app-endpoint",
@@ -42,10 +42,10 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 @pytest.fixture(scope="session")
 def compose_integration_enabled(pytestconfig: pytest.Config) -> None:
-    """Skip real-service tests unless the caller explicitly opts in."""
+    """Skip real-service tests only when the caller explicitly opts out."""
 
-    if not pytestconfig.getoption("run_compose_integration"):
-        pytest.skip("pass --run-compose-integration to use the Compose services")
+    if pytestconfig.getoption("skip_compose_integration"):
+        pytest.skip("skipped by --skip-compose-integration")
 
 
 @pytest.fixture(scope="session")
