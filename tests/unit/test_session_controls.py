@@ -13,7 +13,6 @@ from openai import APIConnectionError
 import render_and_strip_mcp.browser_agent as browser_agent_module
 from render_and_strip_mcp.agent_context import Stage
 from render_and_strip_mcp.agent_loop import StageRunner, StageRunResult
-from render_and_strip_mcp.errors import BrowserAgentError
 
 from .test_browser_agent import (
     FakeBrowserClient,
@@ -24,28 +23,31 @@ from .test_browser_agent import (
 
 
 @pytest.mark.parametrize(
-    ("dependency_error", "expected_message"),
+    ("dependency_error", "expected_error", "expected_message"),
     [
         (
             litellm.ContextWindowExceededError("too large", "test-model", "openai"),
-            "Model context exhausted:",
+            litellm.ContextWindowExceededError,
+            "too large",
         ),
         (
             APIConnectionError(
                 message="provider offline",
                 request=httpx.Request("POST", "https://model.example/v1/chat/completions"),
             ),
+            APIConnectionError,
             "provider offline",
         ),
-        (ToolError("remote browser failed"), "remote browser failed"),
+        (ToolError("remote browser failed"), ToolError, "remote browser failed"),
     ],
 )
-def test_dependency_errors_are_translated_and_cleaned_up(
+def test_dependency_errors_propagate_and_clean_up(
     monkeypatch: pytest.MonkeyPatch,
     dependency_error: Exception,
+    expected_error: type[Exception],
     expected_message: str,
 ) -> None:
-    """Only documented provider and remote dependency errors receive outward translation."""
+    """Dependency errors propagate from the agent after browser cleanup."""
 
     client = FakeBrowserClient(["https://example.test/start"] * 2)
     install_fake_session(monkeypatch, client)
@@ -61,7 +63,7 @@ def test_dependency_errors_are_translated_and_cleaned_up(
 
     monkeypatch.setattr(browser_agent_module.StageRunner, "run", fail_stage)
 
-    with pytest.raises(BrowserAgentError, match=expected_message):
+    with pytest.raises(expected_error, match=expected_message):
         asyncio.run(
             browser_agent_module.BrowserAgent(
                 settings(),

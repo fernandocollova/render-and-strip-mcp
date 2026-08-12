@@ -110,7 +110,7 @@ class RecordingProgressReporter:
         self.operational_statuses: list[str] = []
         self.flush_count = 0
 
-    async def accept(self, reasoning_fragment: str) -> None:
+    async def accept(self, reasoning_fragment: str, **kwargs: object) -> None:
         """Accept model reasoning without recording it in orchestration-only tests."""
 
     async def accept_operational_status(self, status: str) -> None:
@@ -322,6 +322,7 @@ def test_agent_emits_labelled_operational_milestones_without_stage_reports(
         "Reconstruction",
         "Collection",
         "Final extraction and cleaning",
+        "Closing browser",
     ]
     assert reporter.flush_count == 1
 
@@ -525,11 +526,10 @@ def test_agent_rejects_invalid_input_before_opening_session(
         )
 
 
-def test_cleanup_preserves_primary_failure(
+def test_cleanup_failure_replaces_primary_failure(
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Cleanup errors are logged without replacing an earlier processing failure."""
+    """A cleanup failure is raised with the earlier processing failure as its cause."""
 
     client = FakeBrowserClient(["https://example.test/start"] * 2, cleanup_error=True)
     install_fake_session(monkeypatch, client)
@@ -545,7 +545,7 @@ def test_cleanup_preserves_primary_failure(
 
     monkeypatch.setattr(browser_agent_module.StageRunner, "run", fail_stage)
 
-    with pytest.raises(BrowserAgentError, match="primary failure"):
+    with pytest.raises(BrowserAgentError, match="cleanup failed") as error_info:
         asyncio.run(
             browser_agent_module.BrowserAgent(
                 settings(),
@@ -553,4 +553,5 @@ def test_cleanup_preserves_primary_failure(
             ).run("https://example.test/", "task")
         )
 
-    assert "cleanup failed" in caplog.text
+    assert isinstance(error_info.value.__cause__, BrowserAgentError)
+    assert str(error_info.value.__cause__) == "primary failure"

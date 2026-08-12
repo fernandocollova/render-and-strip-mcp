@@ -51,7 +51,7 @@ class AgentSettings(StrictSettingsModel):
     max_model_turns: PositiveInteger = 12
     max_browser_actions: PositiveInteger = 30
     max_paginated_documents: PositiveInteger = 25
-    idle_timeout_seconds: PositiveSeconds = 600
+    run_timeout_seconds: PositiveSeconds = 60 * 60
     navigation_timeout_seconds: PositiveSeconds = 20
     browser_action_timeout_seconds: PositiveSeconds = 15
     model_request_timeout_seconds: PositiveSeconds = 90

@@ -104,7 +104,8 @@ class RecordingProgressReporter:
         self.reasoning_fragments: list[str] = []
         self.flush_count = 0
 
-    async def accept(self, reasoning_fragment: str) -> None:
+    async def accept(self, reasoning_fragment: str, **kwargs: object) -> None:
+        assert "timeout_to_renew" in kwargs
         self.reasoning_fragments.append(reasoning_fragment)
 
     async def flush_if_needed(self) -> None:

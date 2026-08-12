@@ -8,7 +8,7 @@ from fastmcp.exceptions import ToolError
 from .browser_agent import BrowserAgent
 from .config import Settings
 from .errors import BrowserAgentError
-from .reasoning_progress import ReasoningProgressReporter
+from .reasoning_progress import ProgressReporter
 
 
 def create_server(settings: Settings) -> FastMCP:
@@ -20,7 +20,7 @@ def create_server(settings: Settings) -> FastMCP:
     async def render_and_strip_page(url: str, task: str, context: Context) -> str:
         """Render a page, complete a browser task, and return clean semantic HTML only."""
 
-        reasoning_progress = ReasoningProgressReporter(
+        reasoning_progress = ProgressReporter(
             maximum_items=settings.progress.reasoning_progress_max_items,
             minimum_interval_seconds=settings.progress.reasoning_progress_min_interval_seconds,
             context=context,

@@ -9,8 +9,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from render_and_strip_mcp.reasoning_progress import (
-    IdleAwareReasoningProgressReporter,
-    ReasoningProgressReporter,
+    ProgressReporter,
 )
 
 
@@ -38,20 +37,20 @@ class FakeProgressContext:
 
 
 @dataclass
-class FakeIdleTimeout:
-    """Record idle-deadline renewals without depending on elapsed wall-clock time."""
+class FakeRenewableTimeout:
+    """Record timeout renewals without depending on elapsed wall-clock time."""
 
-    deadlines: list[float] = field(default_factory=list)
+    renewal_count: int = 0
 
-    def reschedule(self, deadline: float) -> None:
-        self.deadlines.append(deadline)
+    def renew(self) -> None:
+        self.renewal_count += 1
 
 
 def test_zero_interval_delivers_non_blank_fragments_immediately() -> None:
     """Each non-blank fragment is delivered immediately when the interval is zero."""
 
     context = FakeProgressContext()
-    reporter = ReasoningProgressReporter(0, 0, context)  # type: ignore[arg-type]
+    reporter = ProgressReporter(0, 0, context)  # type: ignore[arg-type]
 
     async def exercise() -> None:
         await reporter.accept("  ")
@@ -64,60 +63,54 @@ def test_zero_interval_delivers_non_blank_fragments_immediately() -> None:
 
 
 def test_progress_reports_are_logged_at_debug_level(caplog: pytest.LogCaptureFixture) -> None:
-    """Each submitted MCP progress batch is available for debug troubleshooting."""
+    """Each accepted non-blank progress fragment is available for debug troubleshooting."""
 
     caplog.set_level(logging.DEBUG, logger="render_and_strip_mcp.reasoning_progress")
     context = FakeProgressContext()
-    reporter = ReasoningProgressReporter(0, 0, context)  # type: ignore[arg-type]
+    reporter = ProgressReporter(0, 0, context)  # type: ignore[arg-type]
 
     asyncio.run(reporter.accept("model reasoning"))
 
     assert context.notifications == [(1, "model reasoning")]
-    assert caplog.messages == ["Reporting reasoning progress with 1 item(s): model reasoning"]
+    assert caplog.messages == ["Accepting fragment: model reasoning"]
 
 
-def test_idle_aware_reporter_resets_deadline_for_meaningful_progress() -> None:
-    """Reasoning and operational status renew the active invocation idle deadline."""
+def test_reporter_renews_supplied_timeout_for_meaningful_progress() -> None:
+    """Meaningful reasoning renews its supplied model timeout before delivery."""
 
     context = FakeProgressContext()
-    reporter = ReasoningProgressReporter(0, 0, context)  # type: ignore[arg-type]
-    idle_timeout = FakeIdleTimeout()
+    reporter = ProgressReporter(0, 0, context)  # type: ignore[arg-type]
+    model_timeout = FakeRenewableTimeout()
 
     async def exercise() -> None:
-        idle_aware_reporter = IdleAwareReasoningProgressReporter(
-            reporter,
-            idle_timeout,  # type: ignore[arg-type]
-            60,
+        await reporter.accept(
+            "model reasoning",
+            timeout_to_renew=model_timeout,  # type: ignore[arg-type]
         )
-
-        await idle_aware_reporter.accept("model reasoning")
-        await idle_aware_reporter.accept_operational_status("Access")
+        await reporter.accept_operational_status("Access")
 
     asyncio.run(exercise())
 
-    assert len(idle_timeout.deadlines) == 2
+    assert model_timeout.renewal_count == 1
     assert context.notifications == [(1, "model reasoning"), (1, "[status] Access")]
 
 
-def test_idle_aware_reporter_does_not_reset_deadline_for_blank_progress() -> None:
-    """Empty stream fragments do not keep an invocation alive."""
+def test_reporter_does_not_renew_supplied_timeout_for_blank_progress() -> None:
+    """Empty stream fragments do not keep a model request alive."""
 
     context = FakeProgressContext()
-    reporter = ReasoningProgressReporter(0, 0, context)  # type: ignore[arg-type]
-    idle_timeout = FakeIdleTimeout()
+    reporter = ProgressReporter(0, 0, context)  # type: ignore[arg-type]
+    model_timeout = FakeRenewableTimeout()
 
     async def exercise() -> None:
-        idle_aware_reporter = IdleAwareReasoningProgressReporter(
-            reporter,
-            idle_timeout,  # type: ignore[arg-type]
-            60,
+        await reporter.accept(
+            "  ",
+            timeout_to_renew=model_timeout,  # type: ignore[arg-type]
         )
-
-        await idle_aware_reporter.accept("  ")
 
     asyncio.run(exercise())
 
-    assert idle_timeout.deadlines == []
+    assert model_timeout.renewal_count == 0
     assert context.notifications == []
 
 
@@ -126,7 +119,7 @@ def test_positive_batch_limit_retains_later_fragments_in_order() -> None:
 
     clock = FakeClock()
     context = FakeProgressContext()
-    reporter = ReasoningProgressReporter(2, 5, context, clock)  # type: ignore[arg-type]
+    reporter = ProgressReporter(2, 5, context, clock)  # type: ignore[arg-type]
 
     async def exercise() -> None:
         await reporter.accept("first")
@@ -152,7 +145,7 @@ def test_unlimited_batch_delivers_all_buffered_fragments_when_eligible() -> None
 
     clock = FakeClock()
     context = FakeProgressContext()
-    reporter = ReasoningProgressReporter(0, 5, context, clock)  # type: ignore[arg-type]
+    reporter = ProgressReporter(0, 5, context, clock)  # type: ignore[arg-type]
 
     async def exercise() -> None:
         await reporter.accept("first")
@@ -172,7 +165,7 @@ def test_positive_interval_delays_the_initial_progress_delivery() -> None:
 
     clock = FakeClock()
     context = FakeProgressContext()
-    reporter = ReasoningProgressReporter(0, 5, context, clock)  # type: ignore[arg-type]
+    reporter = ProgressReporter(0, 5, context, clock)  # type: ignore[arg-type]
 
     async def exercise() -> None:
         await reporter.accept("first")
@@ -194,7 +187,7 @@ def test_delivery_failure_is_non_fatal_and_later_batches_remain_eligible(
     """A reporting error does not prevent a later progress delivery attempt."""
 
     context = FakeProgressContext(delivery_error=RuntimeError("notification unavailable"))
-    reporter = ReasoningProgressReporter(0, 0, context)  # type: ignore[arg-type]
+    reporter = ProgressReporter(0, 0, context)  # type: ignore[arg-type]
 
     async def exercise() -> None:
         await reporter.accept("first")

@@ -57,12 +57,13 @@ it.
 
 - `allow_plain_http` defaults to `false`; only HTTPS initial URLs are accepted by default. Enable
   it only for trusted local HTTP fixtures.
-- Default execution limits are 12 model turns, 30 browser actions, a 600-second idle limit, 20
+- Default execution limits are 12 model turns, 30 browser actions, a 3600-second run limit, 20
   navigation seconds, 15 action seconds, 90 model-request seconds, a 0-second optional settle
   grace, and 10 cleanup seconds. The model-turn and browser-action limits apply independently to
   access, discovery, reconstruction, each retained-document collection, and each pagination-advance
-  iteration. The idle deadline resets when the agent reports model reasoning or an operational
-  milestone. `max_paginated_documents` defaults to 25 captured pages across the invocation.
+  iteration. The run deadline is renewed immediately before browser closing. The model-request
+  deadline resets when the model reports non-blank reasoning. `max_paginated_documents` defaults
+  to 25 captured pages across the invocation.
   Reaching that limit succeeds only if the final page's semantic or natural completion assessment
   succeeds; otherwise the request fails without partial HTML.
   Navigation calls use the navigation timeout, while each other browser operation (tab handling,

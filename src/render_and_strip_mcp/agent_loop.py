@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from functools import partial
 
 from .agent_context import PageState, Stage, format_browser_action
 from .config import AgentSettings, LlmSettings
 from .errors import ExecutionLimitError, MissingStageCompletionError, ModelStreamError
 from .model_stream import stream_model_turn
 from .playwright_tools import ToolCatalog
-from .reasoning_progress import IdleAwareReasoningProgressReporter, ReasoningProgressReporter
+from .reasoning_progress import ProgressReporter
+from .renewable_timeout import RenewableTimeout
 from .stage_models import StageReportValue
 
 BrowserAction = Callable[[str, dict[str, object]], Awaitable[PageState]]
@@ -47,7 +48,7 @@ class StageRunner:
     agent_settings: AgentSettings
     tool_catalog: ToolCatalog
     execute_browser_action: BrowserAction
-    reasoning_progress: ReasoningProgressReporter | IdleAwareReasoningProgressReporter
+    reasoning_progress: ProgressReporter
 
     async def run(self, stage: Stage, task: str, initial_state: PageState) -> StageRunResult:
         """Run fresh model turns until one stage submits its required local completion tool."""
@@ -71,16 +72,17 @@ class StageRunner:
                 state.current_state,
                 state.preceding_state,
             )
-            try:
-                async with asyncio.timeout(self.agent_settings.model_request_timeout_seconds):
-                    model_turn = await stream_model_turn(
-                        self.llm_settings,
-                        stage_catalog,
-                        messages,
+            model_timeout = RenewableTimeout(self.agent_settings.model_request_timeout_seconds)
+            async with model_timeout:
+                model_turn = await stream_model_turn(
+                    self.llm_settings,
+                    stage_catalog,
+                    messages,
+                    partial(
                         self.reasoning_progress.accept,
-                    )
-            except TimeoutError as error:
-                raise ExecutionLimitError("Model request time limit exceeded.") from error
+                        timeout_to_renew=model_timeout,
+                    ),
+                )
             await self.reasoning_progress.flush_if_needed()
             if model_turn.tool_call is None:
                 raise MissingStageCompletionError(
